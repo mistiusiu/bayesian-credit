@@ -41,7 +41,7 @@ URL for them above, as well as copies of any plain-text lines
 beginning with `Required Notice:` that the licensor provided
 with the software.  For example:
 
-> Required Notice: Copyright Demistify Labs, Inc. (http://demistify.labs)
+> Required Notice: Copyright Demistify Labs, Inc. (https://demistify.labs)
 
 ## Changes and New Works License
 
