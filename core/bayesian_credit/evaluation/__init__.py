@@ -1,14 +1,15 @@
-"""Table 11 evaluation (SPEC §2.12): predictive metrics and policy metrics.
+"""Table 11 evaluation (SPEC §2.12): predictive metrics, policy metrics and the report.
 
 * :mod:`.predictive` — Brier, AUC, ECE / reliability, log loss, MAE / RMSE, transition
   log-likelihood and row error.
 * :mod:`.policy` — cumulative reward / regret, rolling reward, selection frequency,
   decline rate, profitability vs historical, inclusion, convergence.
+* :mod:`.report` — :class:`EvaluationReport` (all nine Table 11 dimensions).
 """
 
 from __future__ import annotations
 
-from . import policy, predictive
+from . import policy, predictive, report
 from .policy import (
     LOG_COLUMNS,
     arm_mix,
@@ -33,9 +34,12 @@ from .predictive import (
     transition_log_likelihood,
     transition_row_error,
 )
+from .report import DIMENSIONS, EvaluationReport
 
 __all__ = [
+    "DIMENSIONS",
     "LOG_COLUMNS",
+    "EvaluationReport",
     "arm_mix",
     "brier",
     "convergence_epoch",
@@ -50,6 +54,7 @@ __all__ = [
     "predictive",
     "profitability_vs_historical",
     "reliability_table",
+    "report",
     "rmse",
     "roc_auc",
     "roc_curve",
