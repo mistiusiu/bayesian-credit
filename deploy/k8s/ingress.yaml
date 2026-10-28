@@ -1,0 +1,17 @@
+# Traefik is the default ingress controller on K3s. Point bayesian-credit.local at a node IP
+# (or change the host) — the console proxies /api to the api Service itself.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bayesian-credit
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  rules:
+    - host: bayesian-credit.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: web, port: { number: 80 } }

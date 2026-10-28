@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    name: core library (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e "core[dev]"
+      - run: ruff check core scripts
+      - run: cd core && pytest -q
+
+  api:
+    name: django api
+    runs-on: ubuntu-latest
+    needs: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -e "core[dev]" && pip install -r api/requirements.txt
+      - run: ruff check api
+      - run: cd api && python manage.py check
+      - run: cd api && pytest -q
+
+  frontend:
+    name: research console
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # version comes from frontend/package.json "packageManager"
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: cd frontend && pnpm install --frozen-lockfile
+      - run: cd frontend && pnpm typecheck && pnpm lint && pnpm build
+
+  pipeline:
+    name: synthetic end-to-end
+    runs-on: ubuntu-latest
+    needs: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -e "core[dev]"
+      - run: python scripts/run_pipeline.py --source synthetic --n 60000 --max-loans 10000 --out data/runs/ci --seed 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-report
+          path: data/runs/ci/**/report.json
+          if-no-files-found: ignore
+
+  images:
+    name: container images build
+    runs-on: ubuntu-latest
+    needs: [api, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.api
+          push: false
+          tags: bayesian-credit-api:ci
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.frontend
+          push: false
+          tags: bayesian-credit-web:ci

@@ -1,0 +1,24 @@
+# K3s ships the local-path provisioner (RWO). The volume holds the Lending Club file, parquet
+# caches, fit artifacts and simulation run directories (checkpoints live here — this is what
+# makes kill-and-resume possible across pod restarts).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bc-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 40Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bc-db
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi

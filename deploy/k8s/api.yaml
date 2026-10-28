@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: { app: api, app.kubernetes.io/part-of: bayesian-credit }
+spec:
+  replicas: 1            # SQLite + RWO volume => single replica; scale after moving to Postgres
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /api/v1/metrics/
+        prometheus.io/port: "8000"
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001 }
+      terminationGracePeriodSeconds: 60   # lets a running simulation write its checkpoint on SIGTERM
+      containers:
+        - name: api
+          image: bayesian-credit-api
+          imagePullPolicy: IfNotPresent
+          args: ["serve"]
+          ports: [{ containerPort: 8000, name: http }]
+          envFrom:
+            - configMapRef: { name: api-config }
+            - secretRef: { name: api-secrets }
+          volumeMounts:
+            - { name: data, mountPath: /app/data }
+            - { name: db, mountPath: /app/api/db }
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits:   { cpu: "3",    memory: "5Gi" }   # consumer-grade worker nodes (12-16 cores / 32-44 GB aggregate)
+          readinessProbe:
+            httpGet: { path: /api/v1/health/, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/v1/health/, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: bc-data }
+        - name: db
+          persistentVolumeClaim: { claimName: bc-db }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: { app: api }
+spec:
+  selector: { app: api }
+  ports:
+    - { name: http, port: 8000, targetPort: http }

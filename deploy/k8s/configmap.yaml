@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+data:
+  DJANGO_DEBUG: "0"
+  DJANGO_ALLOWED_HOSTS: "*"
+  CORS_ALLOW_ALL_ORIGINS: "1"
+  DATA_ROOT: /app/data
+  ARTIFACT_ROOT: /app/data/artifacts
+  LENDING_CLUB_PATH: /app/data/raw/accepted_2007_to_2018Q4.csv.gz
+  GUNICORN_WORKERS: "2"
+  GUNICORN_THREADS: "4"
+  # Simulation workers are spawned by the API pod as subprocesses by default. Set to "k8s"
+  # to have the API create one Job per simulation from job-template.yaml instead (see DEPLOY.md).
+  SIMULATION_EXECUTOR: subprocess
