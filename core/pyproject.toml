@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bayesian-credit"
+version = "0.1.0"
+description = "Hierarchical Bayesian sequential decision-making for credit risk: Two-Stage Beta-Beta, MCTM, contextual Thompson Sampling, shadow lending engine, PSI Sentinel"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "PolyForm-Noncommercial-1.0.0" }
+authors = [{ name = "Misati Randy Nyambane" }]
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "pandas>=2.2",
+    "duckdb>=1.0",
+    "pyarrow>=16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "hypothesis>=6", "ruff>=0.5", "scikit-learn>=1.5"]
+kafka = ["confluent-kafka>=2.4"]
+
+[tool.setuptools.packages.find]
+include = ["bayesian_credit*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "NPY"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
