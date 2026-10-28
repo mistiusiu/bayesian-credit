@@ -1,0 +1,20 @@
+# Bayesian Credit API (Python 3.14). The modelling library is installed separately:
+#   pip install -e ../core          (local development)
+#   pip install /app/core           (deploy/docker/Dockerfile.api)
+Django==6.1.2
+djangorestframework==3.18.3
+drf-spectacular==0.30.0
+django-cors-headers==4.9.0
+django-filter==26.2
+whitenoise==6.12.0
+gunicorn==26.2.0
+psycopg[binary]==3.3.6
+# data access (also pulled in by bayesian-credit; pinned here because the API imports them)
+duckdb==1.5.6
+pandas==3.0.6
+numpy==2.5.4
+pyarrow==26.0.0
+scipy==1.18.1
+# tests (cd api && pytest)
+pytest==9.1.1
+pytest-django==4.14.0
