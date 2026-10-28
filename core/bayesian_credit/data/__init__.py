@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .arms import NULL_POLICY, ArmSpace, LendingPolicy, annuity_installment
+from .reference_rates import ReferenceRates
 from .schema import (
     ALL_RETAINED_COLUMNS,
     CATEGORICAL_COLUMNS,
