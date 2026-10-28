@@ -1,0 +1,35 @@
+# Bayesian Credit — API + simulation worker image
+# Build from the repository root:  docker build -f deploy/docker/Dockerfile.api -t bayesian-credit-api .
+FROM python:3.14-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DJANGO_SETTINGS_MODULE=config.settings \
+    DATA_ROOT=/app/data \
+    ARTIFACT_ROOT=/app/data/artifacts \
+    LENDING_CLUB_PATH=/app/data/raw/accepted_2007_to_2018Q4.csv.gz
+
+RUN useradd --create-home --uid 10001 app
+WORKDIR /app
+
+# 1. modelling library (cached layer unless core/ changes)
+COPY core/ /app/core/
+RUN pip install --upgrade pip && pip install /app/core
+
+# 2. API dependencies
+COPY api/requirements.txt /app/api/requirements.txt
+RUN pip install -r /app/api/requirements.txt
+
+# 3. application code
+COPY api/ /app/api/
+COPY scripts/ /app/scripts/
+COPY deploy/docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && mkdir -p /app/data/artifacts /app/data/raw /app/data/processed && chown -R app:app /app
+
+USER app
+WORKDIR /app/api
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/').status==200 else 1)"
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["serve"]

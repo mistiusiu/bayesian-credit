@@ -1,0 +1,58 @@
+# docker compose -f deploy/docker/docker-compose.yml up --build
+# API:      http://localhost:8000/api/docs/
+# Console:  http://localhost:8080
+# Optional Postgres: docker compose --profile postgres up  (and set DATABASE_URL below)
+name: bayesian-credit
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.api
+    image: bayesian-credit-api:local
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
+      DJANGO_ALLOWED_HOSTS: "*"
+      CORS_ALLOW_ALL_ORIGINS: "1"
+      # DATABASE_URL: postgres://bc:bc@postgres:5432/bc
+      GUNICORN_WORKERS: "2"
+    volumes:
+      - ../../data:/app/data          # Lending Club file, parquet caches, fit artifacts, simulation run dirs
+      - api-db:/app/api/db            # sqlite (when DATABASE_URL is unset)
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 6g
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.frontend
+    image: bayesian-credit-web:local
+    environment:
+      API_UPSTREAM: http://api:8000
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: bc
+      POSTGRES_PASSWORD: bc
+      POSTGRES_DB: bc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  api-db:
+  pgdata:
