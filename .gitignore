@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- project specific ---
+.venv/
+data/raw/
+data/processed/
+data/artifacts/
+data/runs/
+*.duckdb
+*.parquet
+node_modules/
+frontend/dist/
+api/db.sqlite3
+api/staticfiles/
+.ruff_cache/
