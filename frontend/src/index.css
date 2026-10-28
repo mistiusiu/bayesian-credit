@@ -1,0 +1,247 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * Design tokens. Chart colours are the validated categorical palette (dataviz skill,
+ * references/palette.md): light and dark are separately stepped, not flipped. Status
+ * colours are reserved for state (good / warning / serious / critical) and always ship
+ * with an icon + label. Text never wears a series colour.
+ */
+:root {
+  color-scheme: light;
+  --plane: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --surface-2: #f3f2ee;
+  --surface-3: #e9e8e2;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #6f6d68;
+  --text-axis: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --border-strong: rgba(11, 11, 11, 0.22);
+  --accent: #256abf;
+  --accent-strong: #1c5cab;
+  --accent-wash: rgba(42, 120, 214, 0.1);
+  --focus: #2a78d6;
+  --delta-good: #006300;
+  --delta-bad: #b42727;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --div-mid: #f0efec;
+  --hatch: rgba(11, 11, 11, 0.13);
+  --band-watch: rgba(250, 178, 25, 0.12);
+  --band-breaker: rgba(208, 59, 59, 0.1);
+  --band-open: rgba(208, 59, 59, 0.1);
+  --band-half: rgba(250, 178, 25, 0.1);
+  --tooltip-bg: #ffffff;
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.06), 0 8px 24px rgba(11, 11, 11, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane: #0d0d0d;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --surface-3: #2e2e2c;
+  --text-primary: #f0efec;
+  --text-secondary: #c3c2b7;
+  --text-muted: #a3a29b;
+  --text-axis: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --accent: #256abf;
+  --accent-strong: #3987e5;
+  --accent-wash: rgba(57, 135, 229, 0.14);
+  --focus: #5598e7;
+  --delta-good: #0ca30c;
+  --delta-bad: #e66767;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --div-mid: #383835;
+  --hatch: rgba(255, 255, 255, 0.12);
+  --band-watch: rgba(250, 178, 25, 0.1);
+  --band-breaker: rgba(208, 59, 59, 0.14);
+  --band-open: rgba(208, 59, 59, 0.16);
+  --band-half: rgba(250, 178, 25, 0.1);
+  --tooltip-bg: #232322;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+@theme inline {
+  --color-plane: var(--plane);
+  --color-surface: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-muted: var(--text-muted);
+  --color-axis: var(--text-axis);
+  --color-grid: var(--grid);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-wash: var(--accent-wash);
+  --color-good: var(--status-good);
+  --color-warning: var(--status-warning);
+  --color-serious: var(--status-serious);
+  --color-critical: var(--status-critical);
+  --color-delta-good: var(--delta-good);
+  --color-delta-bad: var(--delta-bad);
+  --color-s1: var(--series-1);
+  --color-s2: var(--series-2);
+  --color-s3: var(--series-3);
+  --color-s4: var(--series-4);
+  --color-s5: var(--series-5);
+  --color-s6: var(--series-6);
+  --color-s7: var(--series-7);
+  --color-s8: var(--series-8);
+}
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --shadow-pop: var(--shadow);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+  html {
+    background: var(--plane);
+  }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  ::selection {
+    background: var(--accent-wash);
+  }
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  table {
+    border-collapse: collapse;
+  }
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  .field-input {
+    width: 100%;
+    height: 2rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+  .field-input:hover {
+    border-color: var(--text-axis);
+  }
+  .field-input:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 0;
+  }
+  .field-input[aria-invalid="true"] {
+    border-color: var(--status-critical);
+  }
+  select.field-input {
+    padding-right: 1.6rem;
+  }
+  /* Not-admissible marker: a sparse, low-contrast 45° hatch on the empty surface (state, not a value). */
+  .hatch-na {
+    background-color: var(--surface-2);
+    background-image: repeating-linear-gradient(45deg, transparent 0 5px, var(--hatch) 5px 6.5px);
+  }
+  .cell-scroll::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .cell-scroll::-webkit-scrollbar-thumb {
+    background: var(--surface-3);
+    border-radius: 4px;
+  }
+}
+
+/* Recharts: keep chrome recessive; text tokens only. */
+.recharts-cartesian-axis-tick-value {
+  fill: var(--text-axis);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.recharts-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+.recharts-wrapper:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
