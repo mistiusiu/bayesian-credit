@@ -1,0 +1,33 @@
+# One Kubernetes Job per simulation run (alternative to the in-pod subprocess executor).
+# Substitute RUN_DIR (a directory under /app/data/artifacts/simulations/<id>/run that already
+# contains config.json) and apply. Re-applying with `resume` continues from the last checkpoint —
+# this is the G.6 "state recovery" experiment: delete the pod mid-run and apply the resume Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sim-${SIM_ID}
+  namespace: bayesian-credit
+  labels: { app: simulation, simulation: "${SIM_ID}" }
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: { app: simulation, simulation: "${SIM_ID}" }
+    spec:
+      restartPolicy: OnFailure           # a killed worker is restarted; the entrypoint resumes from latest.pkl
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001 }
+      containers:
+        - name: worker
+          image: ghcr.io/mistiusiu/bayesian-credit-api:latest
+          args: ["resume", "${RUN_DIR}"]   # `resume` behaves like `run` when no checkpoint exists yet
+          envFrom:
+            - configMapRef: { name: api-config }
+          volumeMounts:
+            - { name: data, mountPath: /app/data }
+          resources:
+            requests: { cpu: "1", memory: "2Gi" }
+            limits:   { cpu: "4", memory: "8Gi" }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: bc-data }
