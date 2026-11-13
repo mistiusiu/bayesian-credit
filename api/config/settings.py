@@ -16,8 +16,17 @@ Everything deployment-specific comes from the environment (12-factor):
                          (default ``<DATA_ROOT>/artifacts``)
 ``LENDING_CLUB_PATH``    Kaggle CSV (default ``<DATA_ROOT>/raw/accepted_2007_to_2018Q4.csv.gz``)
 ``CORS_ALLOW_ALL_ORIGINS`` open CORS (default: on when debug); ``CORS_ALLOWED_ORIGINS`` list
-``JOBS_SYNC``            run background jobs inline in the request (tests, ``manage.py demo``)
+``JOBS_SYNC``            run background jobs inline in the request (tests, ``manage.py demo --inline``)
 ``JOB_PROGRESS_INTERVAL`` seconds between job progress writes (default 2)
+``TEMPORAL_ADDRESS``     Temporal frontend ``host:port`` (default ``localhost:7233``)
+``TEMPORAL_NAMESPACE``   Temporal namespace (default ``default``)
+``TEMPORAL_TASK_QUEUE``  task queue the job workers poll (default ``bayesian-credit-jobs``)
+``TEMPORAL_API_KEY``     API key for Temporal Cloud (enables TLS); unset for a self-hosted server
+``TEMPORAL_UI_URL``      Temporal web UI, linked from job payloads (default ``http://localhost:8233``)
+``TEMPORAL_WORKER_CONCURRENCY`` jobs one ``temporal_worker`` process runs at once (default 2)
+``TEMPORAL_HEARTBEAT_TIMEOUT`` seconds without a heartbeat before Temporal declares a worker lost (default 60)
+``TEMPORAL_GC_SCHEDULE`` cron spec of the artifact garbage collection schedule (default
+                         ``0 3 * * *``; empty disables it)
 =======================  =================================================================
 """
 
@@ -185,9 +194,22 @@ ARTIFACT_ROOT = env_path("ARTIFACT_ROOT", DATA_ROOT / "artifacts")
 LENDING_CLUB_PATH = env_path("LENDING_CLUB_PATH", DATA_ROOT / "raw" / "accepted_2007_to_2018Q4.csv.gz")
 JOBS_SYNC = env_bool("JOBS_SYNC", False)
 JOB_PROGRESS_INTERVAL = float(os.environ.get("JOB_PROGRESS_INTERVAL", "2"))
-#: Only the in-pod subprocess executor is implemented by the API; see deploy/k8s/job-template.yaml
-#: for running a run directory as a Kubernetes Job by hand.
-SIMULATION_EXECUTOR = os.environ.get("SIMULATION_EXECUTOR", "subprocess")
+#: Dotted path of the job backend (``apps.common.backends``). Empty: ``InlineBackend`` when
+#: ``JOBS_SYNC`` is on, otherwise ``TemporalBackend`` — every background job is a Temporal
+#: workflow executed by ``manage.py temporal_worker``.
+JOBS_BACKEND = os.environ.get("JOBS_BACKEND", "")
+
+# --------------------------------------------------------------------------- Temporal
+TEMPORAL_ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
+TEMPORAL_NAMESPACE = os.environ.get("TEMPORAL_NAMESPACE", "default")
+TEMPORAL_TASK_QUEUE = os.environ.get("TEMPORAL_TASK_QUEUE", "bayesian-credit-jobs")
+TEMPORAL_API_KEY = os.environ.get("TEMPORAL_API_KEY", "")
+TEMPORAL_UI_URL = os.environ.get("TEMPORAL_UI_URL", "http://localhost:8233").rstrip("/")
+TEMPORAL_WORKER_CONCURRENCY = int(os.environ.get("TEMPORAL_WORKER_CONCURRENCY", "2"))
+TEMPORAL_HEARTBEAT_TIMEOUT = float(os.environ.get("TEMPORAL_HEARTBEAT_TIMEOUT", "60"))
+#: How long an API request waits for Temporal (start, describe, chaos update) before giving up.
+TEMPORAL_RPC_TIMEOUT = float(os.environ.get("TEMPORAL_RPC_TIMEOUT", "10"))
+TEMPORAL_GC_SCHEDULE = os.environ.get("TEMPORAL_GC_SCHEDULE", "0 3 * * *")
 #: Size of the per-process LRU cache of loaded fits (FittedModels + shadow engine).
 FIT_CACHE_SIZE = int(os.environ.get("FIT_CACHE_SIZE", "4"))
 #: Posterior-predictive draws per arm in POST /fits/{id}/shadow/evaluate/.

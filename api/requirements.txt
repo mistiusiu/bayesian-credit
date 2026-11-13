@@ -9,6 +9,8 @@ django-filter==26.2
 whitenoise==6.12.0
 gunicorn==26.2.0
 psycopg[binary]==3.3.6
+# background jobs: Temporal workflows (manage.py temporal_worker)
+temporalio==1.36.0
 # data access (also pulled in by bayesian-credit; pinned here because the API imports them)
 duckdb==1.5.6
 pandas==3.0.6
