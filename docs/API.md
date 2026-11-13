@@ -64,9 +64,12 @@ The console shows `detail` verbatim, maps field errors onto form fields, and doe
 
 Ingest, fit, simulation and shadow-portfolio requests are long-running. They return
 immediately with the created resource (status `queued`) and an embedded [Job](#41-job).
-Work runs as `python manage.py run_job <job_id>` (a k8s Job in the cluster). The console polls
-the resource (or the job) every **1.5 s** while it is `queued`/`running` and stops when it
-settles. Lifecycle mapping:
+Each job is a **Temporal workflow** (`BackgroundJob`, id in `Job.workflow_id`) on the
+`TEMPORAL_TASK_QUEUE`; a `manage.py temporal_worker` process picks it up and runs
+`python manage.py run_job <job_id>` as a supervised child, heartbeating to Temporal. A job
+stays `queued` until a worker takes it (no worker running = jobs wait, they are never lost).
+The console polls the resource (or the job) every **1.5 s** while it is `queued`/`running` and
+stops when it settles. Lifecycle mapping:
 
 | Job `status` | Dataset / Fit `status` |
 |---|---|
@@ -79,6 +82,12 @@ settles. Lifecycle mapping:
 Simulations have their own richer lifecycle (§8.3); their job stays `running` while the
 simulation is `running`, `paused` or `awaiting_review`, becomes `failed` when the worker
 dies (`interrupted`), and `succeeded` when the run completes.
+
+Worker loss is decided by Temporal: when a worker stops heartbeating
+(`TEMPORAL_HEARTBEAT_TIMEOUT`, default 60 s) or its `run_job` child dies without recording an
+outcome, ingest / fit / shadow-portfolio jobs are retried on another worker (3 attempts in
+all); a simulation is not retried: its job fails with `message = "worker lost"` and the run
+becomes `interrupted`, ready to resume from its checkpoint.
 
 ### 1.4 Units used by report metrics (`MetricUnit`)
 
@@ -175,10 +184,23 @@ OpenAPI stays at `/api/schema/` and Swagger at `/api/docs/` (drf-spectacular).
 ### `GET /health/`
 
 ```json
-{ "status": "ok", "version": "0.1.0", "python": "3.14.0", "core_version": "0.1.0" }
+{
+  "status": "ok", "version": "0.1.0", "python": "3.14.0", "core_version": "0.1.0",
+  "jobs": {
+    "backend": "temporal",
+    "temporal": {
+      "address": "temporal:7233", "namespace": "default", "task_queue": "bayesian-credit-jobs",
+      "ui_url": "http://localhost:8233", "connected": true, "workers": ["bc-worker@worker-0"], "error": null
+    }
+  }
+}
 ```
 
-`status` is `"ok"` or `"degraded"` (e.g. artifact root not writable).
+`status` is `"ok"` or `"degraded"` (artifact root not writable, database down, Temporal
+unreachable, or no worker polling the task queue — jobs would queue forever). `jobs.backend`
+is `"temporal"`, or `"inline"` (with `temporal: null`) when jobs run inside the request
+(tests, `manage.py demo --inline`). `workers` lists the identities Temporal saw polling the
+queue in the last few minutes.
 
 ### 4.1 Job
 
@@ -196,14 +218,18 @@ OpenAPI stays at `/api/schema/` and Swagger at `/api/docs/` (drf-spectacular).
 | `log_tail` | string[] | last ≤ 50 log lines, oldest first |
 | `created_at` / `started_at` / `finished_at` | timestamp / null | |
 | `target` | `{ type: "dataset" \| "fit" \| "simulation", id }` / null | resource the job builds or drives; shadow-portfolio jobs point at their **fit** |
-| `pid` | int / null | worker pid while running |
+| `pid` | int / null | pid of the `run_job` process on the worker host while running |
+| `workflow_id` | string / null | Temporal workflow id (`bc-<kind>-<id>-<suffix>`); null for inline jobs |
+| `temporal_url` | string / null | the workflow in the Temporal web UI |
 
 ```json
 {
   "id": 101, "kind": "ingest", "status": "succeeded", "progress": 1, "message": "dataset ready",
   "log_tail": ["[12:18:42] resolving source and schema", "[12:18:48] projecting the 60 retained Table 3 columns (data minimisation, F.4)"],
   "created_at": "2026-10-13T12:18:42Z", "started_at": "2026-10-13T12:18:42Z", "finished_at": "2026-10-13T12:19:23Z",
-  "target": { "type": "dataset", "id": 1 }, "pid": null
+  "target": { "type": "dataset", "id": 1 }, "pid": null,
+  "workflow_id": "bc-ingest-101-643cf98a75",
+  "temporal_url": "http://localhost:8233/namespaces/default/workflows/bc-ingest-101-643cf98a75"
 }
 ```
 
@@ -1093,6 +1119,11 @@ The breaker moves to `half_open`; a run waiting in `awaiting_review` resumes fro
     non-PRE_DECISION keys is a 400 (LeakageError), not silently dropped.
 16. **`historical_expected_reward`** is computed for the exact issued policy (amount, rate, term),
     with the risk of the nearest arm's leaf.
+17. **Temporal**: jobs are Temporal workflows (SPEC §3 sketched subprocess jobs); `Job` adds
+    `workflow_id` / `temporal_url`, `Health` adds `jobs` (backend, Temporal address, task queue,
+    polling workers). `POST /simulations/{id}/chaos/` is a `chaos` update on the job's workflow:
+    the worker's supervisor SIGKILLs the `run_job` process wherever it runs and the request
+    returns once the process is gone (~1 s).
 
 ---
 
