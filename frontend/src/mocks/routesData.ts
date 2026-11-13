@@ -220,7 +220,24 @@ function createPortfolio(fitId: number, raw: unknown, now: number) {
 }
 
 export const dataRoutes: Route[] = [
-  ['GET', /^\/health\/$/, (): Health => ({ status: 'ok', version: '0.1.0-mock', python: '3.14.0', core_version: '0.1.0' })],
+  ['GET', /^\/health\/$/, (): Health => ({
+      status: 'ok',
+      version: '0.1.0-mock',
+      python: '3.14.0',
+      core_version: '0.1.0',
+      jobs: {
+        backend: 'temporal',
+        temporal: {
+          address: 'localhost:7233',
+          namespace: 'default',
+          task_queue: 'bayesian-credit-jobs',
+          ui_url: 'http://localhost:8233',
+          connected: true,
+          workers: ['bc-worker@mock'],
+          error: null,
+        },
+      },
+    }),],
   [
     'GET',
     /^\/jobs\/$/,

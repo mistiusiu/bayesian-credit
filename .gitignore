@@ -223,6 +223,7 @@ data/raw/
 data/processed/
 data/artifacts/
 data/runs/
+data/temporal.db*
 *.duckdb
 *.parquet
 node_modules/

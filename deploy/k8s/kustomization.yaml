@@ -6,7 +6,9 @@ resources:
   - configmap.yaml
   - secret.yaml
   - pvc.yaml
+  - temporal.yaml
   - api.yaml
+  - worker.yaml
   - web.yaml
   - ingress.yaml
 images:

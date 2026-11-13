@@ -238,7 +238,7 @@ Temporal split **[decision]**: fit on `issue_d < 2015-01-01`, stream 2015-01 →
 
 ## 3. API contract (Django + DRF, base `/api/v1/`, JSON, CORS open in dev)
 
-Background work runs as **subprocess jobs** (`python manage.py run_job <job_id>`); a `Job` row tracks `status (queued|running|succeeded|failed|cancelled)`, `progress (0–1)`, `message`, `log_tail`, `started_at`, `finished_at`, `pid`. In k8s the same command is a Job pod. Artifacts (pickled core objects, parquet, run dirs) live under `ARTIFACT_ROOT` (default `./data/artifacts`).
+Background work runs as **Temporal workflows**, one per job, executed by `python manage.py temporal_worker` processes that supervise `python manage.py run_job <job_id>` *(revised 2026-11: originally subprocess jobs spawned by the API)*; a `Job` row tracks `status (queued|running|succeeded|failed|cancelled)`, `progress (0–1)`, `message`, `log_tail`, `started_at`, `finished_at`, `pid`, `workflow_id`. In k8s the workers are a Deployment next to a Temporal server. Artifacts (pickled core objects, parquet, run dirs) live under `ARTIFACT_ROOT` (default `./data/artifacts`).
 
 | Method & path | Body / params | Returns |
 |---|---|---|

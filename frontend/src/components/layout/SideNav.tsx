@@ -23,6 +23,7 @@ export function SideNav() {
   const jobs = useActiveJobs().data?.results ?? [];
   const pending = useReviews({ status: 'pending' }).data?.count ?? 0;
   const health = useHealth();
+  const temporal = health.data?.jobs?.temporal ?? null;
   return (
     <nav aria-label="Primary" className="sticky top-0 flex h-screen w-14 shrink-0 flex-col border-r border-line bg-surface xl:w-52">
       <div className="flex h-12 items-center gap-2 border-b border-line px-3.5">
@@ -75,6 +76,25 @@ export function SideNav() {
           <span className="hidden xl:inline">{MOCK_MODE ? 'Mock API' : 'Live API'}</span>
           <span className="num hidden xl:inline">{health.data ? `v${health.data.version}` : health.isError ? 'unreachable' : ''}</span>
         </div>
+        {temporal && (
+          <a
+            href={temporal.ui_url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1.5 flex items-center gap-1.5 hover:text-ink"
+            title={
+              temporal.connected
+                ? `Temporal ${temporal.address} · queue ${temporal.task_queue}\n${temporal.workers.length ? temporal.workers.join('\n') : 'no worker polling: jobs stay queued'}`
+                : `Temporal ${temporal.address} unreachable: ${temporal.error ?? ''}`
+            }
+          >
+            <StatusGlyph tone={!temporal.connected ? 'critical' : temporal.workers.length ? 'good' : 'warning'} />
+            <span className="hidden xl:inline">Temporal</span>
+            <span className="num hidden xl:inline">
+              {temporal.connected ? `${temporal.workers.length} worker${temporal.workers.length === 1 ? '' : 's'}` : 'down'}
+            </span>
+          </a>
+        )}
       </div>
     </nav>
   );

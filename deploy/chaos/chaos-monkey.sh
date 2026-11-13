@@ -6,9 +6,11 @@
 #   Local / docker-compose (kills the worker process through the API's chaos endpoint):
 #     deploy/chaos/chaos-monkey.sh --api http://localhost:8000 --simulation 3 --rounds 3 --interval 25
 #
-#   Kubernetes (deletes the worker pod; the Job/Deployment restarts it and the entrypoint resumes):
-#     deploy/chaos/chaos-monkey.sh --k8s --namespace bayesian-credit --selector app=simulation --rounds 3 --interval 60
-#     deploy/chaos/chaos-monkey.sh --k8s --selector app=api            # node-failure style: kill the API pod itself
+#   Kubernetes (force-deletes a Temporal worker pod; the Deployment replaces it, Temporal notices the
+#   lost heartbeat and the run turns `interrupted`; with --simulation the script then resumes it):
+#     deploy/chaos/chaos-monkey.sh --k8s --api http://bayesian-credit.local --simulation 3 --rounds 3 --interval 60
+#     deploy/chaos/chaos-monkey.sh --k8s --selector app=api            # kill the API pod itself
+#     deploy/chaos/chaos-monkey.sh --k8s --selector app=temporal       # kill the Temporal server
 #
 # Exit code 0 when every round recovered (status back to running/completed), 1 otherwise.
 set -euo pipefail
@@ -19,7 +21,7 @@ ROUNDS=3
 INTERVAL=30
 MODE="api"
 NAMESPACE="bayesian-credit"
-SELECTOR="app=simulation"
+SELECTOR="app=worker"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,7 +32,7 @@ while [[ $# -gt 0 ]]; do
     --k8s) MODE="k8s"; shift;;
     --namespace) NAMESPACE="$2"; shift 2;;
     --selector) SELECTOR="$2"; shift 2;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0;;
     *) echo "unknown arg $1"; exit 2;;
   esac
 done
@@ -61,9 +63,22 @@ for ((round=1; round<=ROUNDS; round++)); do
     kubectl -n "$NAMESPACE" delete pod "$pod" --grace-period=0 --force >/dev/null
     log "waiting for a replacement pod to become Ready"
     if kubectl -n "$NAMESPACE" wait --for=condition=Ready pod -l "$SELECTOR" --timeout=180s >/dev/null 2>&1; then
-      log "replacement Ready ✔ — the worker entrypoint resumes from the last checkpoint on the PVC"
+      log "replacement Ready ✔"
     else
-      log "no Ready replacement within 180s ✘"; failures=$((failures+1))
+      log "no Ready replacement within 180s ✘"; failures=$((failures+1)); continue
+    fi
+    if [[ -n "$SIM" ]]; then
+      # the lost worker is detected once its heartbeat times out (TEMPORAL_HEARTBEAT_TIMEOUT)
+      for _ in $(seq 1 60); do
+        now=$(status_of); [[ "$now" == interrupted* || "$now" == completed* ]] && break; sleep 3
+      done
+      log "after pod loss: $(status_of)"
+      if [[ "$(status_of)" == interrupted* ]]; then
+        curl -fsS -X POST "$API/api/v1/simulations/$SIM/resume/" >/dev/null || true
+        sleep 8
+      fi
+      after=$(status_of); log "after resume: $after"
+      case "$after" in running*|completed*) log "recovered ✔";; *) log "NOT recovered ✘"; failures=$((failures+1));; esac
     fi
   fi
 done

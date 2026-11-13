@@ -106,10 +106,32 @@ export interface ApiErrorBody {
 // ─────────────────────────────────────────────────────────────── health & jobs
 /** GET /health/ */
 export interface Health {
+  /** `degraded` also when jobs cannot run: Temporal unreachable or no worker polling. */
   status: 'ok' | 'degraded';
   version: string;
   python: string;
   core_version: string;
+  jobs: JobsHealth;
+}
+
+/** Where background jobs run. `inline` only in tests / `manage.py demo --inline`. */
+export interface JobsHealth {
+  backend: 'temporal' | 'inline';
+  temporal: TemporalHealth | null;
+}
+
+export interface TemporalHealth {
+  /** Temporal frontend `host:port`. */
+  address: string;
+  namespace: string;
+  /** Task queue the `manage.py temporal_worker` processes poll. */
+  task_queue: string;
+  /** Temporal web UI base URL. */
+  ui_url: string;
+  connected: boolean;
+  /** Identities of the workers currently polling the task queue. */
+  workers: string[];
+  error: string | null;
 }
 
 export interface JobTarget {
@@ -117,7 +139,7 @@ export interface JobTarget {
   id: Id;
 }
 
-/** Background work (`python manage.py run_job <id>` subprocess or k8s Job). GET /jobs/{id}/ */
+/** Background work: one Temporal `BackgroundJob` workflow, run by a `manage.py temporal_worker`. GET /jobs/{id}/ */
 export interface Job {
   id: Id;
   kind: JobKind;
@@ -133,7 +155,12 @@ export interface Job {
   finished_at: IsoDateTime | null;
   /** Resource the job builds or drives. Shadow-portfolio jobs point at their fit. */
   target: JobTarget | null;
+  /** pid of the job's `run_job` process on the worker host (null once finished). */
   pid: number | null;
+  /** Temporal workflow id (null for inline jobs). */
+  workflow_id: string | null;
+  /** The workflow in the Temporal web UI. */
+  temporal_url: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────── datasets

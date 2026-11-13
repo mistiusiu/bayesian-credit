@@ -186,7 +186,7 @@ Checkpoints therefore contain no bit-generator state. Everything else is a pure 
 the dataset, the configuration and the checkpointed state (caches are invalidated on every
 state change and the two environment shortcuts are bit-identical to the reference code –
 see `test_environment.py`). `test_runner.py` kills runs after 5 and after 6 epochs
-(exception in the progress callback), SIGKILLs a subprocess worker mid-run, cancels via
+(exception in the progress callback), SIGKILLs a worker process mid-run, cancels via
 `control.json`, pauses and resumes, and asserts that the decision logs, time series and
 Sentinel tables equal an uninterrupted run exactly.
 

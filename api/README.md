@@ -5,27 +5,30 @@ It exposes the `bayesian_credit` modelling library (`../core`) over the JSON con
 [`frontend/src/api/types.ts`](../frontend/src/api/types.ts) (authoritative) and
 [`docs/API.md`](../docs/API.md): datasets, fits (Two-Stage Beta-Beta + MCTM), the shadow
 engine, replay simulations with the PSI Sentinel, and the human-in-the-loop review queue.
-Long-running work runs as background jobs; simulations talk to the API only through files
-in a run directory, so a worker can be SIGKILLed (chaos) and resumed from its checkpoint.
+Long-running work runs as background jobs on **Temporal**: one workflow per job, executed by
+`manage.py temporal_worker` processes. Simulations talk to the API only through files in a run
+directory, so a worker can be SIGKILLed (chaos) and resumed from its checkpoint.
 
 ## Quick start
 
 ```bash
 cd <repo> && . .venv/bin/activate          # Python 3.14; core installed: pip install -e core
 pip install -r api/requirements.txt
+temporal server start-dev --db-filename ../data/temporal.db   # (or `make temporal`) gRPC :7233, UI http://localhost:8233
 cd api
 python manage.py migrate
-python manage.py demo                      # ~25 s: 20k synthetic loans, fit, portfolio, 2 simulations
+python manage.py temporal_worker           # (another terminal, or `make worker`) runs every background job
+python manage.py demo                      # ~30 s: 20k synthetic loans, fit, portfolio, 2 simulations (via the worker)
 python manage.py runserver 8010            # http://127.0.0.1:8010/api/docs/  (port 8000 is taken on the dev box)
-pytest -q                                  # ~18 s, in-memory SQLite, jobs inline
+pytest -q                                  # ~25 s, in-memory SQLite, jobs inline + a local Temporal dev server
 ```
 
 | URL | |
 |---|---|
 | `/api/v1/` | REST API (index of collections) |
 | `/api/docs/` | Swagger UI · `/api/schema/` OpenAPI 3 (drf-spectacular) |
-| `/api/v1/health/` | `{status, version, python, core_version}` |
-| `/api/v1/metrics/` | Prometheus text: jobs by kind/status, simulations by status, live workers, restarts, reviews |
+| `/api/v1/health/` | `{status, version, python, core_version, jobs: {backend, temporal: {connected, workers, …}}}` |
+| `/api/v1/metrics/` | Prometheus text: jobs by kind/status, simulations by status, live workers, restarts, reviews, Temporal up / polling workers |
 | `/admin/` | Django admin (create a user with `createsuperuser`) |
 
 The console (`frontend/`) proxies `/api` to the backend; point it here with
@@ -43,23 +46,35 @@ The console (`frontend/`) proxies `/api` to the backend; point it here with
 | `ARTIFACT_ROOT` | `<DATA_ROOT>/artifacts` | datasets, fits, run dirs, job logs |
 | `LENDING_CLUB_PATH` | `<DATA_ROOT>/raw/accepted_2007_to_2018Q4.csv.gz` | Kaggle file (`scripts/download_data.sh`) |
 | `CORS_ALLOW_ALL_ORIGINS` | on when debug | `CORS_ALLOWED_ORIGINS` = comma list otherwise |
-| `JOBS_SYNC` | `0` | `1` runs jobs inline in the request (tests, `manage.py demo`) |
+| `JOBS_SYNC` | `0` | `1` runs jobs inline in the request (tests, `manage.py demo --inline`) |
+| `JOBS_BACKEND` | empty | dotted path of a `JobBackend`; empty = `TemporalBackend` (`InlineBackend` under `JOBS_SYNC`) |
+| `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal frontend `host:port` |
+| `TEMPORAL_NAMESPACE` | `default` | |
+| `TEMPORAL_TASK_QUEUE` | `bayesian-credit-jobs` | queue the workers poll |
+| `TEMPORAL_API_KEY` | empty | Temporal Cloud API key (turns on TLS) |
+| `TEMPORAL_UI_URL` | `http://localhost:8233` | base of `Job.temporal_url` |
+| `TEMPORAL_WORKER_CONCURRENCY` | `2` | jobs one `temporal_worker` runs at once |
+| `TEMPORAL_HEARTBEAT_TIMEOUT` | `60` | seconds of silence before Temporal declares a worker lost |
+| `TEMPORAL_RPC_TIMEOUT` | `10` | seconds an API request waits for Temporal |
+| `TEMPORAL_GC_SCHEDULE` | `0 3 * * *` | cron of the artifact-GC schedule (empty disables it) |
 | `JOB_PROGRESS_INTERVAL` | `2` | seconds between progress writes of a running job |
 | `SHADOW_SAMPLES` | `2000` | posterior-predictive draws per arm in the shadow engine |
 | `FIT_CACHE_SIZE` | `4` | fits kept loaded per process (LRU) |
-| `SIMULATION_EXECUTOR` | `subprocess` | only the subprocess executor is implemented by the API (see k8s note below) |
 
-SQLite runs in WAL mode with `IMMEDIATE` transactions so the API and its worker
-subprocesses can write concurrently; use Postgres before scaling to several API replicas.
+SQLite runs in WAL mode with `IMMEDIATE` transactions so the API and the job processes can
+write concurrently (workers must share the database file and `ARTIFACT_ROOT`); use Postgres
+before running workers on other hosts or several API replicas.
 
 ## Layout
 
 ```
 api/
   config/          settings.py (env), test_settings.py (pytest), urls.py, wsgi.py, asgi.py
-  apps/common/     Job model + runner (jobs.py), pagination, exception handler, utils, file caches,
-                   contract serializers (schemas.py mirrors types.ts), /health/ /metrics/ /jobs/,
-                   management commands run_job · demo · gc_artifacts
+  apps/common/     Job model + runner (jobs.py), job backends (backends.py: Temporal, inline),
+                   temporal/ (workflows, worker activities, API client), pagination, exception
+                   handler, utils, file caches, contract serializers (schemas.py mirrors types.ts),
+                   /health/ /metrics/ /jobs/, management commands temporal_worker · run_job · demo ·
+                   gc_artifacts
   apps/datasets/   Dataset model, ingest job, Table 3 variables, summary, DuckDB loan browser
   apps/fits/       Fit model, fit + shadow-portfolio jobs, hierarchy / risk / calibration / MCTM / arms,
                    shadow engine (evaluate, portfolio)
@@ -107,23 +122,42 @@ max 500); timestamps are `YYYY-MM-DDTHH:MM:SSZ`; NaN/inf never appear (→ `null
 ## Jobs
 
 `Job(kind: ingest|fit|simulation|shadow_portfolio, status: queued|running|succeeded|failed|cancelled,
-progress, message, log_tail[≤50], pid, started_at, finished_at, error, target_type/target_id, params)`.
+progress, message, log_tail[≤50], pid, workflow_id, started_at, finished_at, error, target_type/target_id, params)`.
 
-* `JobRunner.launch(job)`: with `JOBS_SYNC` the job runs inline (`apps.common.jobs.execute`);
-  otherwise `python manage.py run_job <id>` starts in a new session (`start_new_session=True`),
-  stdout/stderr → `<ARTIFACT_ROOT>/jobs/<id>.log`, and its pid is stored on the row. A daemon
-  thread waits on the child so exited workers never linger as zombies.
+```
+view ─► JobRunner.create + launch ─► TemporalBackend: start workflow BackgroundJob(job_id)   (API returns at once)
+                                          │ task queue TEMPORAL_TASK_QUEUE
+           manage.py temporal_worker ◄────┘
+             activity run_job ─► `manage.py run_job <id> --supervised` (child; log → jobs/<id>.log)
+                                  └─ execute(job): handler, progress, outcome → Job row
+```
+
+* `JobRunner.launch(job)` hands the job to the backend (`apps/common/backends.py`).
+  `TemporalBackend` stores a workflow id (`bc-<kind>-<id>-<random>`) on the row and starts the
+  `BackgroundJob` workflow (`apps/common/temporal/workflows.py`); if Temporal is unreachable the
+  job fails at once with the reason. `InlineBackend` (`JOBS_SYNC`) runs `execute` in the request.
+* The worker (`manage.py temporal_worker [--concurrency N]`) runs the workflow and its
+  activities on a thread pool. The `run_job` activity spawns `manage.py run_job <id>
+  --supervised` in its own session and heartbeats every 0.5 s; the child exits by itself if its
+  supervisor dies, so a retried job never runs twice. Its pid is stored on the row.
 * `run_job` executes `execute(job)`: marks the job running, dispatches on `kind` to the app
   handler (`apps/*/jobs.py`), records success, cancellation or failure (traceback in `error`,
   last lines in `log_tail`). Progress is written at most every `JOB_PROGRESS_INTERVAL` seconds;
-  log lines (milestones) immediately.
+  log lines (milestones) immediately. A failure recorded by the handler is final (not retried).
 * Handlers call the core pipeline, never re-implement it: ingest → `load_loans(..., with_outcomes=True)`
   + `summarize`; fit → `pipeline.fit_models` (holdout scored inside) + `FittedModels.save`;
   portfolio → `pipeline.run_shadow_portfolio`; simulation → `pipeline.run_simulation` /
   `SimulationRunner.resume` **in the job's own process** (the job's pid is the simulation worker).
-* Lost workers are detected lazily (job/dataset/fit/simulation list and detail views, metrics):
-  an active job whose pid is gone (or reused by another program, checked via `/proc/<pid>/cmdline`)
-  becomes `failed` with `message = "worker lost"`. Nothing runs at import time.
+* **Lost workers** — a worker that stops heartbeating for `TEMPORAL_HEARTBEAT_TIMEOUT`, or a child
+  that dies without recording an outcome. Ingest / fit / portfolio jobs are retried on another
+  worker (3 attempts); after the last attempt, or at once for a simulation, the workflow marks the
+  job `failed` with `message = "worker lost"`. The API also checks lazily (job/dataset/fit/simulation
+  list and detail views, metrics): an active job whose workflow is closed, missing, or has given up
+  on `run_job` is failed the same way, even while no worker is up to record it. An unreachable
+  Temporal never fails a job. Nothing runs at import time.
+* **Maintenance** — workers upsert the `bayesian-credit-artifact-gc` Temporal Schedule
+  (`TEMPORAL_GC_SCHEDULE`), which runs the `ArtifactGC` workflow (same clean-up as
+  `manage.py gc_artifacts --apply`).
 * Datasets and fits derive their status from their job (`queued → running → ready|failed|cancelled`).
 
 ## Run directory protocol (simulations)
@@ -145,8 +179,8 @@ progress, message, log_tail[≤50], pid, started_at, finished_at, error, target_
 | `report.json` | worker at completion | core `EvaluationReport` without a shadow summary (the API rebuilds the report, see deviation 9) |
 
 The API never imports a running worker's state; it reads these files (atomic replaces), so the
-same run directory works with a subprocess worker or a Kubernetes Job
-(`python -m bayesian_credit.simulation.cli resume --run-dir <dir>`, `deploy/k8s/job-template.yaml`).
+same run directory works with a Temporal worker on any host that shares `ARTIFACT_ROOT`, or with
+the core CLI (`python -m bayesian_credit.simulation.cli resume --run-dir <dir>`).
 
 ### Status, pause, review, chaos and resume
 
@@ -161,7 +195,9 @@ same run directory works with a subprocess worker or a Kubernetes Job
   a `Review` row; `POST …/acknowledge/` writes `<id>.ack.json`; a worker in `awaiting_review` picks it
   up and continues (resegment / rollback / resume). Auto-acknowledged trips are recorded too
   (`auto = true`, `acknowledged_by = "auto_ack"`).
-* **chaos** (live worker only) sends SIGKILL to the worker's process group, marks the job failed with
+* **chaos** (live worker only) sends the `chaos` update to the job's workflow: the activity is
+  cancelled and its supervisor SIGKILLs the `run_job` process group on whichever host runs it; the
+  update returns once the process is gone (~1 s). The API then marks the job failed with
   `message = "chaos: worker killed"`, records `last_recovery.killed_at / killed_at_epoch`, appends a
   `WorkerKilled` event; the run is `interrupted`.
 * **resume** on an interrupted / failed / cancelled run deletes a stale `control.json`, starts a *new*
@@ -201,9 +237,13 @@ once — synthetic dataset (6k loans, 2016-06 shift) → fit (train_end 2015-01)
 2015-01..2016-06, 1500 loans, auto_ack, checkpoint_every 2) → a short low-threshold simulation
 (`thompson_se`) whose breaker trips and leaves a pending review — and the tests check every
 endpoint, acknowledge the review, exercise pause/cancel/chaos/resume against a stand-in worker
-process, worker-loss detection, validation errors, framework-exception mapping, Prometheus
-metrics, the OpenAPI schema (`spectacular --validate --fail-on-warn`) and a contract check that
-every property of the `types.ts` interfaces appears in the served payloads. 147 tests, ~18 s.
+process (`tests/backends.py` plays the orchestrator), worker-loss detection, validation errors,
+framework-exception mapping, Prometheus metrics, the OpenAPI schema
+(`spectacular --validate --fail-on-warn`) and a contract check that every property of the
+`types.ts` interfaces appears in the served payloads. `tests/test_temporal.py` runs the real
+`BackgroundJob` workflow on a local Temporal dev server (the `temporal` CLI, or downloaded by the
+SDK; skipped offline unless `BC_REQUIRE_TEMPORAL=1`) and drives the API side against it: launch,
+retries, lost workers, the chaos update, reaping, health and an unreachable server. 155 tests, ~25 s.
 
 Lint: `ruff check api/` (config in `api/ruff.toml`).
 
@@ -211,9 +251,10 @@ Lint: `ruff check api/` (config in `api/ruff.toml`).
 
 `deploy/docker/Dockerfile.api` runs `gunicorn config.wsgi:application` (entrypoint `serve`), with
 `DJANGO_DEBUG=0`, the data volume at `/app/data` and SQLite in the `/app/api/db` volume (or
-`DATABASE_URL`). Worker subprocesses run inside the API container/pod and survive API restarts
-(own session); a restarted API re-attaches by pid. The k8s Job executor is not driven by the API:
-render `deploy/k8s/job-template.yaml` with the run directory to run or resume a simulation as a Job.
+`DATABASE_URL`). The same image runs the workers (entrypoint `worker` → `manage.py
+temporal_worker`) in their own containers / pods next to a Temporal server
+(`deploy/docker/docker-compose.yml`, `deploy/k8s/temporal.yaml` + `worker.yaml`). Jobs survive
+API restarts and redeploys: their state lives in Temporal and the database, not in the API.
 
 ## Contract notes and deviations
 

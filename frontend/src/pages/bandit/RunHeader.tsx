@@ -72,6 +72,14 @@ export function RunHeader({ sim }: { sim: Simulation }) {
         <p className="num text-xs text-ink-2">
           epoch {sim.current_epoch ? fmt.epoch(sim.current_epoch) : '—'} · {sim.epochs_done}/{sim.epochs_total} · last checkpoint {sim.last_checkpoint_epoch ? fmt.epochShort(sim.last_checkpoint_epoch) : 'none'} (every {sim.config.checkpoint_every}) ·{' '}
           {sim.worker.alive ? `worker pid ${sim.worker.pid}` : 'no worker'} · restarts {sim.restarts}
+          {sim.job?.temporal_url && (
+            <>
+              {' · '}
+              <a href={sim.job.temporal_url} target="_blank" rel="noreferrer" className="text-accent-strong underline" title={sim.job.workflow_id ?? undefined}>
+                workflow
+              </a>
+            </>
+          )}
         </p>
       </div>
       {sim.status === 'awaiting_review' && (

@@ -19,6 +19,7 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 
 from . import artifacts
+from .backends import get_backend
 from .filters import JobFilter
 from .jobs import reap_lost_workers
 from .models import Job
@@ -42,12 +43,17 @@ def health(request):
             status = "degraded"
     except OSError:
         status = "degraded"
+    jobs = get_backend().health()
+    temporal = jobs.get("temporal")
+    if temporal is not None and not (temporal["connected"] and temporal["workers"]):
+        status = "degraded"  # jobs would queue forever: no server or no worker polling
     return Response(
         {
             "status": status,
             "version": settings.API_VERSION,
             "python": platform.python_version(),
             "core_version": getattr(bayesian_credit, "__version__", "unknown"),
+            "jobs": jobs,
         }
     )
 
@@ -124,6 +130,22 @@ def metrics(request: HttpRequest) -> HttpResponse:
         if sim.worker_alive()
     )
     _metric(lines, "bc_simulations_running", "Simulations with a live worker process.", "gauge", [({}, running)])
+    temporal = get_backend().health().get("temporal")
+    if temporal is not None:
+        _metric(
+            lines,
+            "bc_temporal_up",
+            "1 when the Temporal frontend answered.",
+            "gauge",
+            [({"address": temporal["address"], "task_queue": temporal["task_queue"]}, int(temporal["connected"]))],
+        )
+        _metric(
+            lines,
+            "bc_temporal_workers",
+            "Workers polling the job task queue.",
+            "gauge",
+            [({"task_queue": temporal["task_queue"]}, len(temporal["workers"]))],
+        )
     restarts = sum(Simulation.objects.values_list("resume_count", flat=True))
     _metric(lines, "bc_simulation_restarts_total", "Resume-from-checkpoint restarts.", "counter", [({}, restarts)])
     ds_counts = Counter(d.status for d in Dataset.objects.select_related("job"))

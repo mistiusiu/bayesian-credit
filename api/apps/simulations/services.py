@@ -4,8 +4,9 @@
 The API never talks to a running worker directly: it reads ``progress.json``,
 ``timeseries.parquet``, ``arms/``, ``decisions/``, ``sentinel.parquet``, ``events.jsonl``,
 ``reviews/`` and ``report.json``, and writes ``control.json`` (pause / resume / cancel) and
-``reviews/<id>.ack.json``. Worker liveness comes from the job's pid, so a SIGKILLed worker
-(chaos) is reported as ``interrupted`` even though its ``progress.json`` still says running.
+``reviews/<id>.ack.json``. Worker liveness comes from the job backend (the job's Temporal
+workflow), so a SIGKILLed worker (chaos) is reported as ``interrupted`` even though its
+``progress.json`` still says running.
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import signal
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
@@ -1668,16 +1668,21 @@ def relaunch(sim: Simulation) -> Simulation:
 
 
 def chaos(sim: Simulation) -> Simulation:
-    """SIGKILL the worker mid-run (G.6 workload-termination experiment)."""
+    """SIGKILL the worker mid-run (G.6 workload-termination experiment).
+
+    The kill is a ``chaos`` update on the job's Temporal workflow: the supervising activity
+    SIGKILLs the ``run_job`` process on whichever worker host runs it, and the update returns
+    once the process is gone."""
     refresh_status(sim)
     job = sim.job
     if sim.status not in ("running", "paused", "awaiting_review") or job is None or not worker_alive(job):
         raise Conflict("chaos needs a running worker")
     pid = job.pid
-    prog = run_directory(sim).read_progress()
-    killed = kill_worker(job, signal.SIGKILL)
+    killed = kill_worker(job)
     if not killed:
         raise Conflict("the worker exited before it could be killed")
+    # read after the kill: the run kept going while the kill travelled through Temporal
+    prog = run_directory(sim).read_progress()
     mark_failed(job, "chaos: worker killed")
     sim.recovery = None
     _record_kill(sim, prog, detected=False)

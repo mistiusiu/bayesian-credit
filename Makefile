@@ -3,7 +3,7 @@ VENV ?= .venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-.PHONY: help setup test lint verify api web pipeline synthetic data docker k8s clean
+.PHONY: help setup test lint verify temporal worker api web pipeline synthetic data docker k8s clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -28,7 +28,13 @@ verify: ## Everything: lint, core + API tests, frontend typecheck/lint/build, qu
 
 API_PORT ?= 8010
 
-api: ## Run the Django API on :$(API_PORT) (8000 is often taken on dev machines)
+temporal: ## Run a local Temporal dev server (gRPC :7233, UI http://localhost:8233), state in data/temporal.db
+	temporal server start-dev --db-filename data/temporal.db --ui-port 8233
+
+worker: ## Run a Temporal worker that executes the background jobs (needs `make temporal`)
+	cd api && ../$(PY) manage.py temporal_worker
+
+api: ## Run the Django API on :$(API_PORT) (8000 is often taken on dev machines; jobs need `make temporal worker`)
 	cd api && ../$(PY) manage.py migrate --noinput && ../$(PY) manage.py runserver 0.0.0.0:$(API_PORT)
 
 web: ## Run the Vite dev server on :5173 against the live API on :$(API_PORT)
@@ -46,7 +52,7 @@ pipeline: ## End-to-end: ingest → fit → shadow portfolio → simulation → 
 pipeline-lc: ## Same on 200k real loans
 	$(PY) scripts/run_pipeline.py --source lending_club --max-rows 200000
 
-docker: ## Build and start api + frontend containers
+docker: ## Build and start Temporal, api, worker and frontend containers
 	docker compose -f deploy/docker/docker-compose.yml up --build
 
 k8s: ## Apply the K3s manifests

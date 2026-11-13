@@ -243,10 +243,14 @@ flowchart TB
         MN --> SI
         SH --> SI --> EV
     end
-    API["api/  —  Django 6 + DRF<br/>OpenAPI · subprocess jobs · chaos / resume · review queue<br/>147 tests"]
+    API["api/  —  Django 6 + DRF<br/>OpenAPI · chaos / resume · review queue<br/>155 tests"]
+    TMP["Temporal  —  one workflow per job<br/>retries · lost-worker detection · chaos kill · GC schedule"]
+    WRK["temporal_worker  —  ingest · fit · shadow portfolio · simulation<br/>supervised run_job processes"]
     WEB["frontend/  —  React 19 + Vite + TS<br/>Overview · Data · Risk · MCTM · Bandit Lab · Shadow · Sentinel · Evaluation"]
     DEP["deploy/  —  Docker · kustomize for K3s/Talos · chaos monkey · CI"]
     core --> API --> WEB
+    API -- "start / describe / update" --> TMP -- "task queue" --> WRK
+    core --> WRK
     core --> DEP
     API --> DEP
 ```
@@ -254,7 +258,7 @@ flowchart TB
 ```
 bayesian-credit/
 ├── core/bayesian_credit/      the modelling library (no Django inside)
-├── api/                       Django REST API — run-directory file protocol, jobs, chaos/resume
+├── api/                       Django REST API + Temporal job worker — run-directory protocol, chaos/resume
 ├── frontend/                  the research console (mock mode by default, live mode via /api proxy)
 ├── deploy/                    Dockerfiles, docker-compose, kustomize manifests, chaos-monkey.sh
 ├── scripts/                   run_pipeline.py · verify.sh · download_data.sh · make_synthetic.py
@@ -312,6 +316,8 @@ python3.14 -m venv .venv && . .venv/bin/activate
 pip install -e "core[dev]" -r api/requirements.txt
 python scripts/run_pipeline.py --source synthetic               # the whole loop on the synthetic twin, ~70 s
 python scripts/run_pipeline.py --source lending_club --max-rows 300000   # on real data, ~80 s
+make temporal                            # Temporal dev server (brew install temporal), UI http://localhost:8233
+make worker                              # executes every background job (another terminal)
 cd api && python manage.py migrate && python manage.py demo && python manage.py runserver 8010   # http://localhost:8010/api/docs/
 
 # console
@@ -325,7 +331,7 @@ make verify
 Containers and the cluster:
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yml up --build   # console :8080, API :8000
+docker compose -f deploy/docker/docker-compose.yml up --build   # console :8080, API :8000, Temporal UI :8233
 kubectl apply -k deploy/k8s                                     # K3s on Talos — see docs/DEPLOY.md
 deploy/chaos/chaos-monkey.sh --api http://localhost:8010 --simulation 1 --rounds 3   # kill the worker, watch it resume
 ```

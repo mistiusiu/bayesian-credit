@@ -39,6 +39,8 @@ export function renderJob(j: JobRec, now: number): Job {
     finished_at: status === 'succeeded' ? iso(j.startMs + j.durationMs) : j.forced ? iso(j.forced.atMs) : null,
     target: j.target,
     pid: status === 'running' ? j.pid : null,
+    workflow_id: `bc-${j.kind.replace('_', '-')}-${j.id}-mock`,
+    temporal_url: null,
   };
 }
 
@@ -73,6 +75,8 @@ function renderSimJob(j: JobRec, sim: SimRec, now: number): Job {
     finished_at: sim.finishedMs ? iso(sim.finishedMs) : null,
     target: j.target,
     pid: sim.workerAlive && status === 'running' ? sim.pid : null,
+    workflow_id: `bc-simulation-${j.id}-mock`,
+    temporal_url: null,
   };
 }
 
