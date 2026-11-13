@@ -1,4 +1,5 @@
-"""Settings for ``pytest`` (see ``pytest.ini``): in-memory SQLite, inline jobs, temp artifacts."""
+"""Settings for ``pytest`` (see ``pytest.ini``): PostgreSQL (pytest-django creates and drops
+``test_<db>`` on the ``DATABASE_URL`` server, ``make infra``), inline jobs, temp artifacts."""
 
 import os
 import tempfile
@@ -7,7 +8,6 @@ from pathlib import Path
 from .settings import *  # noqa: F403
 
 DEBUG = False
-DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
 JOBS_SYNC = True
 JOBS_BACKEND = "tests.backends.StandInBackend"
 ARTIFACT_ROOT = Path(os.environ.get("TEST_ARTIFACT_ROOT") or tempfile.mkdtemp(prefix="bc-api-tests-"))

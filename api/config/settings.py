@@ -6,11 +6,10 @@ Everything deployment-specific comes from the environment (12-factor):
 ``DJANGO_SECRET_KEY``    secret key (an insecure development key is used when unset)
 ``DJANGO_DEBUG``         ``1``/``true`` enables debug (default ``1`` for local development)
 ``DJANGO_ALLOWED_HOSTS`` comma-separated host list (default ``*``)
-``DATABASE_URL``         ``sqlite:///rel/path``, ``sqlite:////abs/path`` or
-                         ``postgres://user:pass@host:5432/db?sslmode=require``;
-                         default SQLite at ``api/db.sqlite3`` (``api/db/db.sqlite3`` when an
-                         ``api/db/`` directory exists, e.g. the docker volume; ``SQLITE_PATH``
-                         overrides the file)
+``DATABASE_URL``         ``postgres://user:pass@host:5432/db?sslmode=require`` (default
+                         ``postgres://bc:bc@localhost:5432/bc``, the ``make infra`` database);
+                         ``sqlite:///rel/path`` / ``sqlite:////abs/path`` still work for
+                         throw-away experiments
 ``DATA_ROOT``            data directory (default ``<repo>/data``)
 ``ARTIFACT_ROOT``        datasets, fits, simulation run dirs, job logs
                          (default ``<DATA_ROOT>/artifacts``)
@@ -63,15 +62,6 @@ def env_path(name: str, default: Path) -> Path:
     return Path(raw).expanduser().resolve() if raw else default
 
 
-def _sqlite_default_path() -> Path:
-    explicit = os.environ.get("SQLITE_PATH")
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    if (BASE_DIR / "db").is_dir():  # docker-compose / k8s volume mounted at api/db
-        return BASE_DIR / "db" / "db.sqlite3"
-    return BASE_DIR / "db.sqlite3"
-
-
 SQLITE_OPTIONS = {
     "timeout": 30,
     "transaction_mode": "IMMEDIATE",
@@ -79,11 +69,12 @@ SQLITE_OPTIONS = {
 }
 
 
+DEFAULT_DATABASE_URL = "postgres://bc:bc@localhost:5432/bc"
+
+
 def parse_database_url(url: str | None) -> dict:
-    """Minimal ``DATABASE_URL`` parser (sqlite + postgres), so no extra dependency is needed."""
-    if not url:
-        return {"ENGINE": "django.db.backends.sqlite3", "NAME": str(_sqlite_default_path()), "OPTIONS": SQLITE_OPTIONS}
-    parts = urlsplit(url)
+    """Minimal ``DATABASE_URL`` parser (postgres + sqlite), so no extra dependency is needed."""
+    parts = urlsplit(url or DEFAULT_DATABASE_URL)
     scheme = parts.scheme.lower()
     if scheme in {"sqlite", "sqlite3"}:
         path = unquote(parts.netloc + parts.path)
