@@ -312,8 +312,7 @@ git clone https://github.com/mistiusiu/bayesian-credit.git && cd bayesian-credit
 scripts/download_data.sh                 # Kaggle token in ~/.kaggle/access_token; or skip and use the synthetic twin
 
 # backend
-python3.14 -m venv .venv && . .venv/bin/activate
-pip install -e "core[dev]" -r api/requirements.txt
+poetry install --with dev && eval $(poetry env activate)   # Poetry 2: .venv/ with core (editable), API, dev tools
 python scripts/run_pipeline.py --source synthetic               # the whole loop on the synthetic twin, ~70 s
 python scripts/run_pipeline.py --source lending_club --max-rows 300000   # on real data, ~80 s
 make infra                               # PostgreSQL + Temporal (on PostgreSQL) + UI http://localhost:8233 (Docker)

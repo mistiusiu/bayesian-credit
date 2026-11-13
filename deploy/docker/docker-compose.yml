@@ -11,7 +11,12 @@
 # visibility (temporal_visibility) databases; see deploy/k8s/config/.
 name: bayesian-credit
 
+# The API and the workers write into the bind-mounted ./data: run them as its owner
+# (export HOST_UID=$(id -u) HOST_GID=$(id -g) when that is not 1000:1000).
+x-app-user: &app-user "${HOST_UID:-1000}:${HOST_GID:-1000}"
+
 x-app-env: &app-env
+  HOME: /tmp                      # the host uid has no home in the image (gunicorn's control socket)
   DJANGO_DEBUG: "0"
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
   DJANGO_ALLOWED_HOSTS: "*"
@@ -108,13 +113,14 @@ services:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.api
     image: bayesian-credit-api:local
+    user: *app-user
     environment:
       <<: *app-env
       GUNICORN_WORKERS: "2"
     volumes:
-      - ../../data:/app/data          # Lending Club file, parquet caches, fit artifacts, simulation run dirs
+      - ../../data:/app/data:z        # (:z = SELinux shared label) Lending Club file, parquet caches, fit artifacts, simulation run dirs
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       postgres: { condition: service_healthy }
       temporal-namespace: { condition: service_completed_successfully }
@@ -129,11 +135,12 @@ services:
     # Runs every background job: `manage.py temporal_worker` supervises one `run_job` process per job.
     image: bayesian-credit-api:local
     command: ["worker"]
+    user: *app-user
     environment:
       <<: *app-env
       TEMPORAL_WORKER_CONCURRENCY: "2"
     volumes:
-      - ../../data:/app/data          # shared with the API: artifacts and run directories
+      - ../../data:/app/data:z        # shared with the API: artifacts and run directories
     depends_on:
       api: { condition: service_healthy }       # the API container applies the migrations
     healthcheck:
@@ -154,7 +161,7 @@ services:
     environment:
       API_UPSTREAM: http://api:8000
     ports:
-      - "8080:80"
+      - "${WEB_PORT:-8080}:80"
     depends_on:
       - api
     restart: unless-stopped

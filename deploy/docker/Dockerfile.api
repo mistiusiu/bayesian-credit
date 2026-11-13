@@ -1,10 +1,37 @@
 # Bayesian Credit — API + Temporal job worker image (entrypoint modes: serve, worker, …)
 # Build from the repository root:  docker build -f deploy/docker/Dockerfile.api -t bayesian-credit-api .
+# Dependencies come from poetry.lock (main group only), installed into /opt/venv.
+
+# ---------------------------------------------------------------- dependencies (Poetry)
+FROM python:3.14-slim AS deps
+
+ENV PIP_NO_CACHE_DIR=1 \
+    POETRY_VERSION=2.4.1 \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
+
+RUN python -m venv /opt/poetry && /opt/poetry/bin/pip install "poetry==${POETRY_VERSION}" \
+    && python -m venv /opt/venv
+WORKDIR /app
+
+# 1. third-party packages (cached unless the lock or the manifests change)
+COPY pyproject.toml poetry.lock poetry.toml ./
+COPY core/pyproject.toml core/
+RUN /opt/poetry/bin/poetry install --only main --no-root --no-directory
+
+# 2. the modelling library (editable path dependency → /app/core)
+COPY core/ core/
+RUN /opt/poetry/bin/poetry install --only main --no-root
+
+# ---------------------------------------------------------------- runtime
 FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
     DJANGO_SETTINGS_MODULE=config.settings \
     DATA_ROOT=/app/data \
     ARTIFACT_ROOT=/app/data/artifacts \
@@ -13,19 +40,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd --create-home --uid 10001 app
 WORKDIR /app
 
-# 1. modelling library (cached layer unless core/ changes)
+COPY --from=deps /opt/venv /opt/venv
 COPY core/ /app/core/
-RUN pip install --upgrade pip && pip install /app/core
-
-# 2. API dependencies
-COPY api/requirements.txt /app/api/requirements.txt
-RUN pip install -r /app/api/requirements.txt
-
-# 3. application code
 COPY api/ /app/api/
 COPY scripts/ /app/scripts/
 COPY deploy/docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh && mkdir -p /app/data/artifacts /app/data/raw /app/data/processed && chown -R app:app /app
+# static files are collected at build time, so the container may run as any uid (compose: the host user)
+RUN chmod +x /app/entrypoint.sh && mkdir -p /app/data/artifacts /app/data/raw /app/data/processed \
+    && cd /app/api && python manage.py collectstatic --noinput >/dev/null \
+    && chown -R app:app /app
 
 USER app
 WORKDIR /app/api

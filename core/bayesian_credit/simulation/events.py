@@ -318,7 +318,8 @@ class JSONLSink:
 class KafkaSink:
     """Optional Kafka adapter: publishes every event (JSON) to ``topic``.
 
-    Requires ``confluent-kafka`` (``pip install bayesian-credit[kafka]``); the import is
+    Requires ``confluent-kafka`` (``poetry install --with kafka`` in the workspace, or
+    ``pip install bayesian-credit[kafka]``); the import is
     guarded so the core package never depends on it. ``config`` is passed to
     ``confluent_kafka.Producer`` (e.g. ``{"bootstrap.servers": "localhost:9092"}``).
     """

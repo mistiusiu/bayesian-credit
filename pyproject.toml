@@ -1,0 +1,48 @@
+# Poetry workspace for the whole repository: the modelling library (core/, an editable path
+# dependency), the Django API + Temporal worker (api/) and the dev tooling. `poetry install`
+# creates .venv/ in the repository root (poetry.toml). The frontend uses pnpm (frontend/).
+[project]
+name = "bayesian-credit-workspace"
+version = "0.1.0"
+description = "Shadow lending engine: bayesian_credit library, Django API, Temporal job worker"
+authors = [{ name = "Misati Randy Nyambane" }]
+requires-python = ">=3.12,<3.15"
+# dependencies come from [tool.poetry.dependencies] (path dependency on core/, extras)
+dynamic = ["dependencies"]
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+bayesian-credit = { path = "core", develop = true }
+# API (api/)
+django = "^6.1.2"
+djangorestframework = "^3.18.3"
+drf-spectacular = "^0.30.0"
+django-cors-headers = "^4.9.0"
+django-filter = "^26.2"
+whitenoise = "^6.12.0"
+gunicorn = "^26.2.0"
+psycopg = { version = "^3.3.6", extras = ["binary"] }
+# background jobs: Temporal workflows (manage.py temporal_worker)
+temporalio = "^1.36.0"
+# data access (also required by bayesian-credit; the API imports them directly)
+duckdb = "^1.5.6"
+pandas = "^3.0.6"
+numpy = "^2.5.4"
+pyarrow = "^26.0.0"
+scipy = "^1.18.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.1.1"
+pytest-django = "^4.14.0"
+hypothesis = "^6.170.12"
+ruff = "^0.17.3"
+scikit-learn = "^1.9.1"
+
+# KafkaSink for the simulation event store: poetry install --with kafka
+[tool.poetry.group.kafka]
+optional = true
+
+[tool.poetry.group.kafka.dependencies]
+confluent-kafka = "^2.4"

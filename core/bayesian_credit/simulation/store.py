@@ -144,6 +144,16 @@ def atomic_write_parquet(path: str | os.PathLike[str], df: pd.DataFrame, fsync: 
     return p
 
 
+def read_parquet_snapshot(path: str | Path) -> pd.DataFrame:
+    """Read a parquet file that a writer may be replacing (:func:`atomic_write_parquet`).
+
+    Reading by path can open the file more than once (footer first, then the column pages); an
+    ``os.replace`` in between pairs the old footer with the new file ("Page was smaller than
+    expected"). One open descriptor pins a single inode for the whole read."""
+    with open(path, "rb") as fh:
+        return pd.read_parquet(fh, engine="pyarrow")
+
+
 def read_json(path: str | os.PathLike[str], default: Any = None) -> Any:
     """Parse a JSON file; ``default`` if it is missing or (transiently) unreadable."""
     p = Path(path)
@@ -181,7 +191,7 @@ def _read_epoch_frames(directory: Path) -> pd.DataFrame | None:
     files = _epoch_files(directory)
     if not files:
         return None
-    frames = [pd.read_parquet(p, engine="pyarrow") for _, p in files]
+    frames = [read_parquet_snapshot(p) for _, p in files]
     frames = [f for f in frames if len(f.columns)]
     if not frames:
         return None
@@ -543,7 +553,7 @@ class RunDirectory:
     def read_timeseries(self) -> pd.DataFrame:
         if not self.timeseries_path.is_file():
             return pd.DataFrame()
-        return pd.read_parquet(self.timeseries_path, engine="pyarrow")
+        return read_parquet_snapshot(self.timeseries_path)
 
     def write_sentinel(self, df: pd.DataFrame) -> Path:
         return atomic_write_parquet(self.sentinel_path, df, fsync=False)
@@ -551,7 +561,7 @@ class RunDirectory:
     def read_sentinel(self) -> pd.DataFrame:
         if not self.sentinel_path.is_file():
             return pd.DataFrame()
-        return pd.read_parquet(self.sentinel_path, engine="pyarrow")
+        return read_parquet_snapshot(self.sentinel_path)
 
     def write_runtime(self, runtime: Mapping[str, Any]) -> Path:
         return atomic_write_json(self.runtime_path, dict(runtime), fsync=False)

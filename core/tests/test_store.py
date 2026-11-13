@@ -178,3 +178,31 @@ def test_runner_keeps_an_api_prepared_config(tmp_path):
     assert after["created_at"] == before["created_at"] and after["dataset"]["simulation_id"] == 17
     assert after["dataset"]["path"] == str(data_path) and after["fit_dir"] == str(tmp_path / "shared" / "fit")
     assert not (rd.path / "dataset.parquet").exists() and not (rd.path / "fit").exists()
+
+
+def test_snapshot_read_survives_concurrent_atomic_replace(tmp_path):
+    """The API reads timeseries / sentinel parquet while the worker replaces them every epoch."""
+    import threading
+
+    from bayesian_credit.simulation.store import atomic_write_parquet, read_parquet_snapshot
+
+    path = tmp_path / "timeseries.parquet"
+    frames = [pd.DataFrame({"epoch": [f"2015-{m:02d}"] * n, "x": np.arange(n, dtype=float)}) for m, n in ((1, 50), (2, 4000))]
+    atomic_write_parquet(path, frames[0], fsync=False)
+    stop = threading.Event()
+
+    def writer():
+        i = 0
+        while not stop.is_set():
+            atomic_write_parquet(path, frames[i % 2], fsync=False)
+            i += 1
+
+    t = threading.Thread(target=writer, daemon=True)
+    t.start()
+    try:
+        for _ in range(400):
+            df = read_parquet_snapshot(path)
+            assert len(df) in (50, 4000) and df["x"].iloc[-1] == len(df) - 1
+    finally:
+        stop.set()
+        t.join(timeout=10)
