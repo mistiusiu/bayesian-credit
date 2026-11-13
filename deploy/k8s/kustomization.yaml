@@ -6,11 +6,18 @@ resources:
   - configmap.yaml
   - secret.yaml
   - pvc.yaml
+  - postgres.yaml
   - temporal.yaml
   - api.yaml
   - worker.yaml
   - web.yaml
   - ingress.yaml
+configMapGenerator:
+  - name: bc-config-files        # shared with deploy/docker/docker-compose.yml
+    files:
+      - config/postgres-init.sh
+      - config/temporal-setup.sh
+      - config/temporal-dynamicconfig.yaml
 images:
   - name: bayesian-credit-api
     newName: ghcr.io/mistiusiu/bayesian-credit-api

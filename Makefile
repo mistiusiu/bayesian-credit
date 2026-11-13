@@ -3,7 +3,7 @@ VENV ?= .venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-.PHONY: help setup test lint verify temporal worker api web pipeline synthetic data docker k8s clean
+.PHONY: help setup test lint verify infra infra-down worker api web pipeline synthetic data docker k8s clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -28,13 +28,20 @@ verify: ## Everything: lint, core + API tests, frontend typecheck/lint/build, qu
 
 API_PORT ?= 8010
 
-temporal: ## Run a local Temporal dev server (gRPC :7233, UI http://localhost:8233), state in data/temporal.db
-	temporal server start-dev --db-filename data/temporal.db --ui-port 8233
+COMPOSE := docker compose -f deploy/docker/docker-compose.yml
+INFRA := postgres temporal temporal-ui
 
-worker: ## Run a Temporal worker that executes the background jobs (needs `make temporal`)
+infra: ## Start PostgreSQL + Temporal (on PostgreSQL) + Temporal UI for local work: :5432, :7233, http://localhost:8233
+	$(COMPOSE) up -d --wait $(INFRA)
+	$(COMPOSE) run --rm temporal-namespace
+
+infra-down: ## Stop the local infrastructure (data stays in the pgdata volume)
+	$(COMPOSE) stop $(INFRA)
+
+worker: ## Run a Temporal worker that executes the background jobs (needs `make infra`)
 	cd api && ../$(PY) manage.py temporal_worker
 
-api: ## Run the Django API on :$(API_PORT) (8000 is often taken on dev machines; jobs need `make temporal worker`)
+api: ## Run the Django API on :$(API_PORT) (8000 is often taken on dev machines; needs `make infra`, jobs need `make worker`)
 	cd api && ../$(PY) manage.py migrate --noinput && ../$(PY) manage.py runserver 0.0.0.0:$(API_PORT)
 
 web: ## Run the Vite dev server on :5173 against the live API on :$(API_PORT)

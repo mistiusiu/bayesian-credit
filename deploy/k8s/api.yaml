@@ -4,7 +4,7 @@ metadata:
   name: api
   labels: { app: api, app.kubernetes.io/part-of: bayesian-credit }
 spec:
-  replicas: 1            # SQLite + RWO volume => single replica; scale after moving to Postgres
+  replicas: 1            # the RWO bc-data volume pins it to one node; scale with a ReadWriteMany volume
   strategy: { type: Recreate }
   selector:
     matchLabels: { app: api }
@@ -28,7 +28,6 @@ spec:
             - secretRef: { name: api-secrets }
           volumeMounts:
             - { name: data, mountPath: /app/data }
-            - { name: db, mountPath: /app/api/db }
           resources:
             requests: { cpu: "500m", memory: "1Gi" }
             limits:   { cpu: "2",    memory: "4Gi" }   # jobs run in the worker pods; this serves requests + shadow evaluate
@@ -43,8 +42,6 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim: { claimName: bc-data }
-        - name: db
-          persistentVolumeClaim: { claimName: bc-db }
 ---
 apiVersion: v1
 kind: Service

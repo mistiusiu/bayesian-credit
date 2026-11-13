@@ -14,13 +14,13 @@ directory, so a worker can be SIGKILLed (chaos) and resumed from its checkpoint.
 ```bash
 cd <repo> && . .venv/bin/activate          # Python 3.14; core installed: pip install -e core
 pip install -r api/requirements.txt
-temporal server start-dev --db-filename ../data/temporal.db   # (or `make temporal`) gRPC :7233, UI http://localhost:8233
+make infra                                 # PostgreSQL :5432 + Temporal (on PostgreSQL) :7233 + UI http://localhost:8233
 cd api
-python manage.py migrate
+python manage.py migrate                   # into postgres://bc:bc@localhost:5432/bc (the default DATABASE_URL)
 python manage.py temporal_worker           # (another terminal, or `make worker`) runs every background job
 python manage.py demo                      # ~30 s: 20k synthetic loans, fit, portfolio, 2 simulations (via the worker)
 python manage.py runserver 8010            # http://127.0.0.1:8010/api/docs/  (port 8000 is taken on the dev box)
-pytest -q                                  # ~25 s, in-memory SQLite, jobs inline + a local Temporal dev server
+pytest -q                                  # ~25 s, PostgreSQL test database, jobs inline + a local Temporal dev server
 ```
 
 | URL | |
@@ -41,7 +41,7 @@ The console (`frontend/`) proxies `/api` to the backend; point it here with
 | `DJANGO_SECRET_KEY` | insecure dev key | set in production |
 | `DJANGO_DEBUG` | `1` | `0` in containers |
 | `DJANGO_ALLOWED_HOSTS` | `*` | comma list |
-| `DATABASE_URL` | SQLite `api/db.sqlite3` (`api/db/db.sqlite3` when an `api/db/` volume exists; `SQLITE_PATH` overrides) | `sqlite:////abs/path`, `sqlite:///rel/to/api`, `postgres://user:pass@host:5432/db?sslmode=require` (parsed in `config/settings.py`, psycopg 3) |
+| `DATABASE_URL` | `postgres://bc:bc@localhost:5432/bc` | `postgres://user:pass@host:5432/db?sslmode=require` (psycopg 3); `sqlite:///…` for throw-away runs |
 | `DATA_ROOT` | `<repo>/data` | |
 | `ARTIFACT_ROOT` | `<DATA_ROOT>/artifacts` | datasets, fits, run dirs, job logs |
 | `LENDING_CLUB_PATH` | `<DATA_ROOT>/raw/accepted_2007_to_2018Q4.csv.gz` | Kaggle file (`scripts/download_data.sh`) |
@@ -61,9 +61,8 @@ The console (`frontend/`) proxies `/api` to the backend; point it here with
 | `SHADOW_SAMPLES` | `2000` | posterior-predictive draws per arm in the shadow engine |
 | `FIT_CACHE_SIZE` | `4` | fits kept loaded per process (LRU) |
 
-SQLite runs in WAL mode with `IMMEDIATE` transactions so the API and the job processes can
-write concurrently (workers must share the database file and `ARTIFACT_ROOT`); use Postgres
-before running workers on other hosts or several API replicas.
+The API and every worker share the PostgreSQL database and `ARTIFACT_ROOT`. A `sqlite:///…`
+URL still works for a throw-away single-host experiment.
 
 ## Layout
 
@@ -230,7 +229,8 @@ per-process LRU keyed by fit id and file mtimes; run-directory tables are memois
 
 ## Tests
 
-`cd api && pytest -q` (settings `config.test_settings`: in-memory SQLite, `JOBS_SYNC`, temp
+`cd api && pytest -q` (settings `config.test_settings`: PostgreSQL — pytest-django creates and drops
+`test_bc` on the `DATABASE_URL` server, so `make infra` first; CI uses a service container — `JOBS_SYNC`, temp
 `ARTIFACT_ROOT`, 500 shadow samples). A session fixture runs the whole workflow through the API
 once — synthetic dataset (6k loans, 2016-06 shift) → fit (train_end 2015-01) → shadow evaluate
 (by loan and by context) → shadow portfolio (1000 loans) → simulation (thompson/historical/random,
@@ -250,8 +250,7 @@ Lint: `ruff check api/` (config in `api/ruff.toml`).
 ## Production notes
 
 `deploy/docker/Dockerfile.api` runs `gunicorn config.wsgi:application` (entrypoint `serve`), with
-`DJANGO_DEBUG=0`, the data volume at `/app/data` and SQLite in the `/app/api/db` volume (or
-`DATABASE_URL`). The same image runs the workers (entrypoint `worker` → `manage.py
+`DJANGO_DEBUG=0`, the data volume at `/app/data` and `DATABASE_URL` pointing at PostgreSQL. The same image runs the workers (entrypoint `worker` → `manage.py
 temporal_worker`) in their own containers / pods next to a Temporal server
 (`deploy/docker/docker-compose.yml`, `deploy/k8s/temporal.yaml` + `worker.yaml`). Jobs survive
 API restarts and redeploys: their state lives in Temporal and the database, not in the API.

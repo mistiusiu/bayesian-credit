@@ -12,7 +12,8 @@ bit-for-bit from its last checkpoint* (`docs/SIMULATION.md`).
 | Image | Dockerfile | Contents |
 |---|---|---|
 | `bayesian-credit-api` | `deploy/docker/Dockerfile.api` | `python:3.14-slim`, the `bayesian_credit` library, Django API (gunicorn), the Temporal job worker, simulation CLI. Entrypoint modes: `serve` (API), `worker` (Temporal worker), `run-job <job_id>`, `simulate <run_dir>`, `resume <run_dir>`, `demo`. |
-| `temporalio/temporal:1.10.0` | upstream | Temporal dev server (single binary, SQLite persistence) + web UI: the workflow engine every background job runs on. |
+| `postgres:17-alpine` | upstream | One PostgreSQL instance: the API database `bc` and Temporal's `temporal` (persistence) and `temporal_visibility` databases. |
+| `temporalio/server:1.32.2` · `admin-tools:1.32.2` · `ui:2.56.1` | upstream | The workflow engine every background job runs on (on PostgreSQL), its schema / namespace tooling and the web UI. |
 | `bayesian-credit-web` | `deploy/docker/Dockerfile.frontend` | Vite production build served by nginx; `/api/` is proxied to `API_UPSTREAM` (default `http://api:8000`). |
 
 Build from the repository root:
@@ -24,7 +25,7 @@ docker build -f deploy/docker/Dockerfile.frontend -t bayesian-credit-web:local .
 
 ## docker compose (laptop / single node)
 
-Needs the compose v2 plugin (`sudo dnf install docker-compose-plugin` on Fedora; Docker Desktop / Rancher Desktop ship it).
+Needs Docker Compose v2 (`sudo dnf install docker-compose-plugin` on Fedora; Docker Desktop / Rancher Desktop ship it).
 
 ```bash
 docker compose -f deploy/docker/docker-compose.yml up --build
@@ -33,30 +34,44 @@ docker compose -f deploy/docker/docker-compose.yml exec api /app/entrypoint.sh d
 docker compose -f deploy/docker/docker-compose.yml up -d --scale worker=2             # more job workers
 ```
 
-Four services: `temporal` (server + UI, state in the `temporal-data` volume), `api`
-(gunicorn; starts workflows, runs no jobs), `worker` (`manage.py temporal_worker`, 2 jobs at
-a time) and `web`. The API and the workers share `./data` and the SQLite volume.
+Services:
+
+| Service | Role |
+|---|---|
+| `postgres` | PostgreSQL 17 (`pgdata` volume). First boot runs `deploy/k8s/config/postgres-init.sh`: role + database `bc` for the API, role `temporal` (CREATEDB). Published on `127.0.0.1:5432`. |
+| `temporal-schema` | one-shot (`admin-tools`): creates `temporal` + `temporal_visibility` and applies every schema version (`deploy/k8s/config/temporal-setup.sh schema`; idempotent, re-run on upgrades) |
+| `temporal` | Temporal server 1.32 on PostgreSQL (`DB=postgres12`; dynamic config `deploy/k8s/config/temporal-dynamicconfig.yaml`), `127.0.0.1:7233` |
+| `temporal-namespace` | one-shot: registers the `default` namespace (30-day retention) |
+| `temporal-ui` | web UI on `127.0.0.1:8233` |
+| `api` | gunicorn; migrates the `bc` database, starts workflows, runs no jobs |
+| `worker` | `manage.py temporal_worker`, 2 jobs at a time; scale with `--scale worker=N` |
+| `web` | the console (nginx), `:8080` |
+
+For local development `make infra` starts only `postgres` + Temporal + UI, and the API and
+worker run from the Poetry environment against `localhost` (`make api`, `make worker`).
 
 `./data` is bind-mounted into the API container: put the Kaggle file at
 `data/raw/accepted_2007_to_2018Q4.csv.gz` (or run `scripts/download_data.sh`) and it is
 visible to the API. Fit artifacts and simulation run directories (checkpoints included) are
-written under `data/artifacts/`. Add `--profile postgres` and set `DATABASE_URL` to move off
-SQLite.
+written under `data/artifacts/`, shared by the API and the workers. Passwords default to
+development values; set `POSTGRES_PASSWORD`, `BC_DB_PASSWORD`, `TEMPORAL_DB_PASSWORD` and
+`DJANGO_SECRET_KEY` in the environment (or an `.env` file next to the compose file) before the
+first `up` — role passwords are applied when the `pgdata` volume is initialised.
 
 ## Kubernetes (K3s on Talos)
 
 Manifests are a kustomization in `deploy/k8s/`:
 
 ```
-namespace.yaml   configmap.yaml   secret.yaml   pvc.yaml   temporal.yaml   api.yaml   worker.yaml   web.yaml   ingress.yaml
+namespace.yaml   configmap.yaml   secret.yaml   pvc.yaml   postgres.yaml   temporal.yaml   api.yaml   worker.yaml   web.yaml   ingress.yaml
+config/          postgres-init.sh · temporal-setup.sh · temporal-dynamicconfig.yaml (→ ConfigMap bc-config-files, also used by compose)
 ```
 
 ```bash
 # 1. cluster: Talos + Omni (or plain K3s). Confirm the default StorageClass is local-path.
 kubectl get storageclass
-# 2. secrets
-kubectl -n bayesian-credit create secret generic api-secrets \
-  --from-literal=DJANGO_SECRET_KEY=$(openssl rand -hex 32) --dry-run=client -o yaml > deploy/k8s/secret.yaml
+# 2. secrets: edit deploy/k8s/secret.yaml (api-secrets: DJANGO_SECRET_KEY, DATABASE_URL;
+#    postgres-secrets: POSTGRES_PASSWORD, BC_DB_PASSWORD, TEMPORAL_DB_PASSWORD) — never commit real ones
 # 3. images: push to a registry the nodes can pull from (edit images: in kustomization.yaml)
 docker tag bayesian-credit-api:local ghcr.io/<you>/bayesian-credit-api:latest && docker push ...
 # 4. deploy
@@ -75,8 +90,10 @@ requests and in-request shadow evaluations; it runs no jobs). Each worker pod re
 2 GiB and is limited to 4 CPU / 8 GiB for `TEMPORAL_WORKER_CONCURRENCY` (2) jobs. Temporal
 needs ~0.1 CPU / 256 MiB. A 50 k-borrower, 6-policy replay runs comfortably inside one
 worker node of the proposal's hardware. The API is a single replica and the workers are
-pinned next to it (pod affinity) because SQLite and the RWO volumes are shared; switch to
-Postgres (`DATABASE_URL`) and a ReadWriteMany volume before spreading workers over nodes.
+pinned next to it (pod affinity) because the RWO `bc-data` volume (artifacts, run directories)
+is shared; with a ReadWriteMany volume the workers can spread over nodes. PostgreSQL is a
+single-replica StatefulSet (20 GiB local-path volume, 0.25–2 CPU / 0.5–2 GiB); Temporal takes
+0.25–2 CPU / 0.5–2 GiB.
 
 ### Background jobs on Temporal
 
@@ -112,10 +129,14 @@ POST /fits/ ──► API: Job row + start workflow bc-fit-<id>-<suffix> ──�
 * **Visibility.** Every job links to its workflow in the Temporal UI (`Job.temporal_url`); the
   console's side navigation shows Temporal's status and the number of polling workers.
 
-The Temporal server here is the single-binary dev server with SQLite persistence on a PVC,
-adequate for one research cluster. For a production deployment point `TEMPORAL_ADDRESS` at a
-Temporal cluster (helm chart) or Temporal Cloud (`TEMPORAL_API_KEY` turns on TLS + API-key
-auth) and delete `temporal.yaml` from the kustomization.
+The Temporal server is a single `temporalio/server` pod (all four services in one process)
+whose persistence and visibility stores are PostgreSQL databases (`temporal`,
+`temporal_visibility`): workflow histories, schedules and list/search queries (`temporal
+workflow list -q 'WorkflowType="BackgroundJob"'`) survive pod and node loss with the database.
+The `schema` initContainer applies new schema versions on upgrade; the `temporal-namespace` Job
+registers the namespace. To scale Temporal itself use the official helm chart against the same
+databases, or Temporal Cloud (`TEMPORAL_API_KEY` turns on TLS + API-key auth), and delete
+`temporal.yaml` from the kustomization.
 
 The core CLI still runs a run directory without the API or Temporal
 (`entrypoint.sh simulate <run_dir>` / `resume <run_dir>`), for experiments outside the console.

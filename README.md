@@ -316,7 +316,7 @@ python3.14 -m venv .venv && . .venv/bin/activate
 pip install -e "core[dev]" -r api/requirements.txt
 python scripts/run_pipeline.py --source synthetic               # the whole loop on the synthetic twin, ~70 s
 python scripts/run_pipeline.py --source lending_club --max-rows 300000   # on real data, ~80 s
-make temporal                            # Temporal dev server (brew install temporal), UI http://localhost:8233
+make infra                               # PostgreSQL + Temporal (on PostgreSQL) + UI http://localhost:8233 (Docker)
 make worker                              # executes every background job (another terminal)
 cd api && python manage.py migrate && python manage.py demo && python manage.py runserver 8010   # http://localhost:8010/api/docs/
 
