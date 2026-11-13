@@ -1,19 +1,18 @@
 SHELL := /bin/bash
 VENV ?= .venv
 PY := $(VENV)/bin/python
-PIP := $(VENV)/bin/pip
 
-.PHONY: help setup test lint verify infra infra-down worker api web pipeline synthetic data docker k8s clean
+.PHONY: help setup lock test lint verify infra infra-down worker api web pipeline synthetic data docker k8s clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-setup: ## Create the Python 3.14 venv, install core (editable) + API deps, install frontend deps
-	test -d $(VENV) || /usr/bin/python3.14 -m venv $(VENV)
-	$(PIP) install -q --upgrade pip
-	$(PIP) install -q -e "core[dev]"
-	$(PIP) install -q -r api/requirements.txt
+setup: ## Install the Poetry environment in .venv (core editable + API + dev tools) and the frontend deps
+	poetry install --with dev
 	cd frontend && pnpm install
+
+lock: ## Re-resolve poetry.lock after editing pyproject.toml
+	poetry lock
 
 test: ## Run core + API tests
 	cd core && ../$(PY) -m pytest -q

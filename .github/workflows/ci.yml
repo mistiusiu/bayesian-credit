@@ -14,11 +14,13 @@ jobs:
         python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
+      - run: pipx install poetry==2.4.1
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-          cache: pip
-      - run: pip install -e "core[dev]"
+          cache: poetry
+      - run: poetry env use python${{ matrix.python }} && poetry install --with dev
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - run: ruff check core scripts
       - run: cd core && pytest -q
 
@@ -38,11 +40,14 @@ jobs:
           --health-cmd "pg_isready -U bc" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - run: pipx install poetry==2.4.1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-          cache: pip
-      - run: pip install -e "core[dev]" && pip install -r api/requirements.txt
+          cache: poetry
+      - run: poetry env use python3.14 && poetry install --with dev
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - run: poetry check --lock
       - run: ruff check api
       - run: cd api && python manage.py check
       - run: cd api && pytest -q
@@ -71,12 +76,13 @@ jobs:
     needs: core
     steps:
       - uses: actions/checkout@v4
+      - run: pipx install poetry==2.4.1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-          cache: pip
-      - run: pip install -e "core[dev]"
-      - run: python scripts/run_pipeline.py --source synthetic --n 60000 --max-loans 10000 --out data/runs/ci --seed 1
+          cache: poetry
+      - run: poetry env use python3.14 && poetry install --only main
+      - run: .venv/bin/python scripts/run_pipeline.py --source synthetic --n 60000 --max-loans 10000 --out data/runs/ci --seed 1
       - uses: actions/upload-artifact@v4
         with:
           name: pipeline-report
