@@ -1,7 +1,8 @@
 """Simulation control actions (pause / resume / cancel / chaos) and worker-loss detection.
 
-A stand-in worker (``python -c 'sleep' run_job <id>``) plays the live simulation process so
-the API's liveness checks, SIGKILL and control files can be exercised without a real run.
+A stand-in worker (``python -c 'sleep' run_job <id>``) plays the live simulation process and
+``tests.backends.StandInBackend`` plays the orchestrator, so the API's liveness checks, the
+chaos SIGKILL and control files can be exercised without a real run or a Temporal server.
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ def test_chaos_kills_the_worker_then_resume_recovers(api, live_sim):
     r = api.post(f"/api/v1/simulations/{sim.pk}/chaos/")
     assert r.status_code == 200, r.content
     body = r.json()
-    from apps.common.jobs import pid_alive
+    from tests.backends import pid_alive
 
     proc.wait(timeout=10)  # (the API already reaped the SIGKILLed child, so the code is not observable here)
     assert not pid_alive(proc.pid)

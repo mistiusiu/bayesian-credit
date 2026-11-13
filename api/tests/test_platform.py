@@ -13,6 +13,7 @@ pytestmark = pytest.mark.django_db
 def test_health(api):
     body = api.get("/api/v1/health/").json()
     assert body["status"] == "ok" and body["version"] and body["python"] and body["core_version"]
+    assert body["jobs"] == {"backend": "inline", "temporal": None}
 
 
 def test_metrics_prometheus_text(api, e2e):
@@ -63,7 +64,7 @@ def test_pid_helpers():
     import subprocess
     import sys
 
-    from apps.common.jobs import pid_alive
+    from tests.backends import pid_alive
 
     assert pid_alive(os.getpid())
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
@@ -79,9 +80,11 @@ def test_reap_marks_dead_workers(api):
     from apps.common.jobs import reap_lost_workers
     from apps.common.models import Job
 
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    job = Job.objects.create(kind="fit", status="running")
+    proc = subprocess.Popen([sys.executable, "-c", "pass", "run_job", str(job.pk)])
     proc.wait()
-    job = Job.objects.create(kind="fit", status="running", pid=proc.pid)
+    job.pid = proc.pid
+    job.save(update_fields=["pid"])
     assert reap_lost_workers() >= 1
     job.refresh_from_db()
     assert job.status == "failed" and job.message == "worker lost" and job.finished_at
