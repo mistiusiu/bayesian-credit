@@ -1,49 +1,71 @@
-# Temporal server for the job workflows: the single-binary dev server with SQLite persistence on
-# a PVC, plus the web UI. Enough for one research cluster; point TEMPORAL_ADDRESS (configmap) at
-# a production Temporal cluster (helm chart temporalio/temporal) or Temporal Cloud to replace it.
+# Temporal server 1.32 on PostgreSQL (persistence: temporal, visibility: temporal_visibility).
+# The initContainer creates the databases and applies every schema version (idempotent, also on
+# upgrades); the temporal-namespace Job registers the `default` namespace; temporal-ui serves the
+# web UI. To use a managed Temporal (helm chart temporalio/temporal, Temporal Cloud) instead,
+# point TEMPORAL_ADDRESS (configmap) at it and drop this file from the kustomization.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: temporal
   labels: { app: temporal, app.kubernetes.io/part-of: bayesian-credit }
 spec:
-  replicas: 1                     # SQLite-backed: exactly one
-  strategy: { type: Recreate }
+  replicas: 1
   selector:
     matchLabels: { app: temporal }
   template:
     metadata:
       labels: { app: temporal }
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000 }
+      initContainers:
+        - name: schema
+          image: temporalio/admin-tools:1.32.2
+          command: ["/bin/sh", "/config/temporal-setup.sh", "schema"]
+          env:
+            - { name: DB, value: postgres12 }
+            - { name: DB_PORT, value: "5432" }
+            - { name: POSTGRES_SEEDS, value: postgres }
+            - { name: POSTGRES_USER, value: temporal }
+            - name: POSTGRES_PWD
+              valueFrom: { secretKeyRef: { name: postgres-secrets, key: TEMPORAL_DB_PASSWORD } }
+            - { name: DBNAME, value: temporal }
+            - { name: VISIBILITY_DBNAME, value: temporal_visibility }
+          volumeMounts:
+            - { name: config, mountPath: /config }
       containers:
         - name: temporal
-          image: temporalio/temporal:1.10.0
-          args:
-            - server
-            - start-dev
-            - --ip=0.0.0.0
-            - --db-filename=/var/lib/temporal/temporal.db
-            - --namespace=default
-            - --log-level=warn
+          image: temporalio/server:1.32.2
+          env:
+            - { name: DB, value: postgres12 }
+            - { name: DB_PORT, value: "5432" }
+            - { name: POSTGRES_SEEDS, value: postgres }
+            - { name: POSTGRES_USER, value: temporal }
+            - name: POSTGRES_PWD
+              valueFrom: { secretKeyRef: { name: postgres-secrets, key: TEMPORAL_DB_PASSWORD } }
+            - { name: DBNAME, value: temporal }
+            - { name: VISIBILITY_DBNAME, value: temporal_visibility }
+            - { name: BIND_ON_IP, value: 0.0.0.0 }
+            - name: TEMPORAL_BROADCAST_ADDRESS
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - { name: LOG_LEVEL, value: warn }
+            - { name: DYNAMIC_CONFIG_FILE_PATH, value: /config/temporal-dynamicconfig.yaml }
           ports:
             - { containerPort: 7233, name: grpc }
-            - { containerPort: 8233, name: ui }
           volumeMounts:
-            - { name: state, mountPath: /var/lib/temporal }
+            - { name: config, mountPath: /config }
           resources:
-            requests: { cpu: "100m", memory: "256Mi" }
-            limits:   { cpu: "1",    memory: "1Gi" }
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits:   { cpu: "2",    memory: "2Gi" }
           readinessProbe:
             tcpSocket: { port: grpc }
+            initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            exec: { command: ["temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"] }
-            initialDelaySeconds: 20
+            tcpSocket: { port: grpc }
+            initialDelaySeconds: 60
             periodSeconds: 30
       volumes:
-        - name: state
-          persistentVolumeClaim: { claimName: bc-temporal }
+        - name: config
+          configMap: { name: bc-config-files, defaultMode: 0755 }
 ---
 apiVersion: v1
 kind: Service
@@ -54,4 +76,60 @@ spec:
   selector: { app: temporal }
   ports:
     - { name: grpc, port: 7233, targetPort: grpc, appProtocol: grpc }
-    - { name: ui, port: 8233, targetPort: ui }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-namespace
+  labels: { app: temporal-namespace }
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 600     # gone before the next `kubectl apply -k`, so the Job can be re-created
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: namespace
+          image: temporalio/admin-tools:1.32.2
+          command: ["/bin/sh", "/config/temporal-setup.sh", "namespace"]
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal:7233" }
+            - { name: TEMPORAL_NAMESPACE, value: default }
+          volumeMounts:
+            - { name: config, mountPath: /config }
+      volumes:
+        - name: config
+          configMap: { name: bc-config-files, defaultMode: 0755 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  labels: { app: temporal-ui, app.kubernetes.io/part-of: bayesian-credit }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: temporal-ui }
+  template:
+    metadata:
+      labels: { app: temporal-ui }
+    spec:
+      containers:
+        - name: ui
+          image: temporalio/ui:2.56.1
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal:7233" }
+          ports: [{ containerPort: 8080, name: http }]
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  labels: { app: temporal-ui }
+spec:
+  selector: { app: temporal-ui }
+  ports:
+    - { name: http, port: 8080, targetPort: http }

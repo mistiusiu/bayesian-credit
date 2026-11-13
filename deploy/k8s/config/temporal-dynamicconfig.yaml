@@ -1,0 +1,8 @@
+# Temporal server dynamic config (DYNAMIC_CONFIG_FILE_PATH); reloaded by the server at runtime.
+# Values follow Temporal's SQL reference deployment.
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}

@@ -21,4 +21,4 @@ spec:
           - path: /
             pathType: Prefix
             backend:
-              service: { name: temporal, port: { number: 8233 } }
+              service: { name: temporal-ui, port: { number: 8080 } }

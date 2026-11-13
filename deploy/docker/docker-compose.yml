@@ -3,7 +3,12 @@
 # Console:      http://localhost:8080
 # Temporal UI:  http://localhost:8233   (every ingest / fit / portfolio / simulation is a workflow)
 # More workers: docker compose -f deploy/docker/docker-compose.yml up --scale worker=2
-# Optional Postgres: docker compose --profile postgres up  (and set DATABASE_URL below)
+#
+# Local development (API + worker from the Poetry venv, infrastructure in containers): `make infra`
+# starts only postgres + Temporal (5432 / 7233 / 8233 on localhost).
+#
+# One PostgreSQL instance holds the API database (bc) and Temporal's persistence (temporal) and
+# visibility (temporal_visibility) databases; see deploy/k8s/config/.
 name: bayesian-credit
 
 x-app-env: &app-env
@@ -11,38 +16,91 @@ x-app-env: &app-env
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
   DJANGO_ALLOWED_HOSTS: "*"
   CORS_ALLOW_ALL_ORIGINS: "1"
-  # DATABASE_URL: postgres://bc:bc@postgres:5432/bc
+  DATABASE_URL: postgres://bc:${BC_DB_PASSWORD:-bc}@postgres:5432/bc
   TEMPORAL_ADDRESS: temporal:7233
   TEMPORAL_NAMESPACE: default
   TEMPORAL_TASK_QUEUE: bayesian-credit-jobs
   TEMPORAL_UI_URL: http://localhost:8233
 
-x-app-volumes: &app-volumes
-  - ../../data:/app/data          # Lending Club file, parquet caches, fit artifacts, simulation run dirs
-  - api-db:/app/api/db            # sqlite (when DATABASE_URL is unset), shared by the API and the workers
+x-temporal-db: &temporal-db
+  DB: postgres12
+  DB_PORT: "5432"
+  POSTGRES_SEEDS: postgres
+  POSTGRES_USER: temporal
+  POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:-temporal}
+  DBNAME: temporal
+  VISIBILITY_DBNAME: temporal_visibility
 
 services:
-  temporal:
-    # Temporal dev server (single binary, SQLite persistence) + web UI. Swap for a production
-    # Temporal cluster or Temporal Cloud by pointing TEMPORAL_ADDRESS elsewhere.
-    image: temporalio/temporal:1.10.0
-    command:
-      - server
-      - start-dev
-      - --ip=0.0.0.0
-      - --db-filename=/home/temporal/temporal.db
-      - --namespace=default
-      - --log-level=warn
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      BC_DB_PASSWORD: ${BC_DB_PASSWORD:-bc}
+      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:-temporal}
     volumes:
-      - temporal-data:/home/temporal
+      - pgdata:/var/lib/postgresql/data
+      - ../k8s/config/postgres-init.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro,z
     ports:
-      - "7233:7233"
-      - "8233:8233"
+      - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bc"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  temporal-schema:
+    # one-shot: create temporal + temporal_visibility and apply every schema version
+    image: temporalio/admin-tools:1.32.2
+    entrypoint: ["/bin/sh", "/scripts/temporal-setup.sh"]
+    command: ["schema"]
+    environment: *temporal-db
+    volumes:
+      - ../k8s/config/temporal-setup.sh:/scripts/temporal-setup.sh:ro,z
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: on-failure
+
+  temporal:
+    image: temporalio/server:1.32.2
+    environment:
+      <<: *temporal-db
+      BIND_ON_IP: 0.0.0.0
+      LOG_LEVEL: warn
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/dynamicconfig/temporal.yaml
+    volumes:
+      - ../k8s/config/temporal-dynamicconfig.yaml:/etc/temporal/dynamicconfig/temporal.yaml:ro,z
+    ports:
+      - "127.0.0.1:7233:7233"
+    depends_on:
+      temporal-schema: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  temporal-namespace:
+    # one-shot: wait for the server, create the `default` namespace (30-day retention) if missing
+    image: temporalio/admin-tools:1.32.2
+    entrypoint: ["/bin/sh", "/scripts/temporal-setup.sh"]
+    command: ["namespace"]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+    volumes:
+      - ../k8s/config/temporal-setup.sh:/scripts/temporal-setup.sh:ro,z
+    depends_on:
+      - temporal
+    restart: on-failure
+
+  temporal-ui:
+    image: temporalio/ui:2.56.1
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8080
+    ports:
+      - "127.0.0.1:8233:8080"
+    depends_on:
+      - temporal
     restart: unless-stopped
 
   api:
@@ -53,11 +111,13 @@ services:
     environment:
       <<: *app-env
       GUNICORN_WORKERS: "2"
-    volumes: *app-volumes
+    volumes:
+      - ../../data:/app/data          # Lending Club file, parquet caches, fit artifacts, simulation run dirs
     ports:
       - "8000:8000"
     depends_on:
-      temporal: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      temporal-namespace: { condition: service_completed_successfully }
     deploy:
       resources:
         limits:
@@ -72,10 +132,10 @@ services:
     environment:
       <<: *app-env
       TEMPORAL_WORKER_CONCURRENCY: "2"
-    volumes: *app-volumes
+    volumes:
+      - ../../data:/app/data          # shared with the API: artifacts and run directories
     depends_on:
-      temporal: { condition: service_healthy }
-      api: { condition: service_started }     # the API container applies the migrations
+      api: { condition: service_healthy }       # the API container applies the migrations
     healthcheck:
       disable: true
     stop_grace_period: 60s                    # a running simulation checkpoints on SIGTERM
@@ -99,19 +159,5 @@ services:
       - api
     restart: unless-stopped
 
-  postgres:
-    image: postgres:17-alpine
-    profiles: ["postgres"]
-    environment:
-      POSTGRES_USER: bc
-      POSTGRES_PASSWORD: bc
-      POSTGRES_DB: bc
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
 volumes:
-  api-db:
   pgdata:
-  temporal-data:
