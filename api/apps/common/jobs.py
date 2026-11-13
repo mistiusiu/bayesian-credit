@@ -1,37 +1,33 @@
-"""Job runner: launch background work inline (``JOBS_SYNC``) or as a detached subprocess.
+"""Background jobs: create, launch, execute, reap.
 
-* :class:`JobRunner.launch` — ``settings.JOBS_SYNC`` → :func:`execute` inline; otherwise
-  ``python manage.py run_job <id>`` in a new session (``start_new_session=True``), stdout and
-  stderr appended to ``<ARTIFACT_ROOT>/jobs/<id>.log``; the child's pid is stored on the row.
-  A daemon thread ``wait()``s on the child so finished workers never linger as zombies.
-* :func:`execute` — runs in the worker: marks the job running, dispatches on ``job.kind`` to the
-  app handler (``HANDLERS``), and records success / failure (traceback in ``error``, last lines
-  in ``log_tail``). A simulation job's process *is* the simulation worker, so SIGKILLing its pid
-  (``POST /simulations/{id}/chaos/``) kills the run mid-epoch.
+* :class:`JobRunner.launch` — hands the job to the backend (:mod:`apps.common.backends`): a
+  Temporal ``BackgroundJob`` workflow by default, inline under ``JOBS_SYNC``.
+* :func:`execute` — runs in the worker (``manage.py run_job <id>``, supervised by the Temporal
+  activity): marks the job running, dispatches on ``job.kind`` to the app handler
+  (``HANDLERS``), and records success / failure (traceback in ``error``, last lines in
+  ``log_tail``). The process's pid is stored on the row; a simulation job's process *is* the
+  simulation worker, so the chaos kill (``POST /simulations/{id}/chaos/``) SIGKILLs the run
+  mid-epoch.
 * :func:`reap_lost_workers` — called lazily by list/detail views (never at import time): an
-  active job whose pid is gone is marked failed with ``message="worker lost"``.
+  active job its backend reports dead is marked failed with ``message="worker lost"``.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import signal
-import subprocess
-import sys
-import threading
 import time
 import traceback
 from collections.abc import Iterable
-from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
 from django.db import close_old_connections, transaction
 from django.utils.module_loading import import_string
 
-from . import artifacts
+from .backends import get_backend
 from .models import Job
+from .temporal.workflows import WORKER_LOST
 from .utils import utcnow
 
 logger = logging.getLogger("apps.jobs")
@@ -50,9 +46,6 @@ FAILURE_HOOKS: dict[str, str] = {
     Job.Kind.FIT: "apps.fits.jobs.on_failure",
     Job.Kind.SIMULATION: "apps.simulations.jobs.on_failure",
 }
-
-WORKER_LOST = "worker lost"
-NEVER_STARTED_AFTER = timedelta(minutes=10)
 
 
 class JobCancelled(Exception):
@@ -113,68 +106,17 @@ class ProgressReporter:
             raise JobCancelled()
 
 
-# ============================================================================ process helpers
-def pid_alive(pid: int | None) -> bool:
-    """True if ``pid`` is a live (non-zombie) process."""
-    if not pid or pid <= 0:
-        return False
-    try:  # reap our own exited child first (otherwise it lingers as a zombie)
-        wpid, _ = os.waitpid(pid, os.WNOHANG)
-        if wpid == pid:
-            return False
-    except ChildProcessError:
-        pass
-    except OSError:
-        pass
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
-            state = fh.read().rsplit(")", 1)[1].split()[0]
-        if state in {"Z", "X"}:
-            return False
-    except (OSError, IndexError):
-        pass
-    return True
-
-
+# ============================================================================ liveness
 def worker_alive(job: Job) -> bool:
-    """A job's worker is alive when its pid is a live process running ``run_job <id>``."""
-    if not job.pid or job.pid == os.getpid():
-        return False
-    if not pid_alive(job.pid):
-        return False
-    try:
-        with open(f"/proc/{job.pid}/cmdline", "rb") as fh:
-            argv = fh.read().split(b"\0")
-        if b"run_job" in argv:
-            return str(job.pk).encode() in argv
-        return False  # pid reused by an unrelated process
-    except OSError:
-        return True  # no /proc (non-Linux): trust kill(pid, 0)
+    """A worker is executing ``job`` right now (per the job backend, e.g. Temporal)."""
+    return bool(job.is_active and get_backend().probe(job).alive)
 
 
-def kill_worker(job: Job, sig: int = signal.SIGKILL) -> bool:
-    """Send ``sig`` to the job's worker (its whole process group when it leads one)."""
-    if not worker_alive(job):
+def kill_worker(job: Job) -> bool:
+    """SIGKILL the job's worker process mid-run (chaos); ``True`` once it is gone."""
+    if not job.is_active:
         return False
-    try:
-        if os.getpgid(job.pid) == job.pid:
-            os.killpg(job.pid, sig)
-        else:
-            os.kill(job.pid, sig)
-    except ProcessLookupError:
-        return False
-    # give the kernel a moment and reap the child so the pid is not reported alive
-    for _ in range(50):
-        if not pid_alive(job.pid):
-            break
-        time.sleep(0.02)
-    return True
+    return get_backend().kill(job)
 
 
 def mark_failed(job: Job, message: str, error: str = "") -> Job:
@@ -195,36 +137,31 @@ def mark_failed(job: Job, message: str, error: str = "") -> Job:
 
 
 def reap_lost_workers(jobs: Iterable[Job] | None = None) -> int:
-    """Mark active jobs whose worker process is gone as failed ("worker lost").
+    """Mark active jobs that no worker will ever finish as failed ("worker lost").
 
-    Inline (``JOBS_SYNC``) jobs have no pid and are never reaped. Queued jobs that never got
-    a pid within ``NEVER_STARTED_AFTER`` (the launching process died) are failed as well.
+    With Temporal that means the job's workflow closed (or never existed) while the row is
+    still queued / running; a workflow that is merely waiting for a worker or retrying is
+    left alone. Inline (``JOBS_SYNC``) jobs are never reaped.
     """
     if jobs is None:
         jobs = Job.objects.filter(status__in=Job.ACTIVE)
+    backend = get_backend()
     lost = 0
-    now = utcnow()
     for job in jobs:
         if job.status not in Job.ACTIVE:
             continue
-        if job.pid is None:
-            if not settings.JOBS_SYNC and job.created_at and now - job.created_at > NEVER_STARTED_AFTER:
-                mark_failed(job, "worker never started")
-                lost += 1
+        if backend.probe(job).state != "dead":
             continue
-        if job.pid == os.getpid():
-            continue
-        if not worker_alive(job):
-            fresh = Job.objects.filter(pk=job.pk).first()
-            if fresh is not None and fresh.status in Job.ACTIVE:
-                mark_failed(fresh, WORKER_LOST)
-                lost += 1
+        fresh = Job.objects.filter(pk=job.pk).first()
+        if fresh is not None and fresh.status in Job.ACTIVE:
+            mark_failed(fresh, WORKER_LOST)
+            lost += 1
     return lost
 
 
 # ============================================================================ runner
 class JobRunner:
-    """Starts jobs (see module docstring)."""
+    """Creates jobs and hands them to the configured backend (see :mod:`apps.common.backends`)."""
 
     @staticmethod
     def create(kind: str, *, target_type: str = "", target_id: int | None = None, params: dict | None = None) -> Job:
@@ -232,40 +169,7 @@ class JobRunner:
 
     @staticmethod
     def launch(job: Job) -> Job:
-        if settings.JOBS_SYNC:
-            execute(job, inline=True)
-            job.refresh_from_db()
-            return job
-        log_path = artifacts.job_log_path(job.pk)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        env = os.environ.copy()
-        env.update(
-            {
-                "DJANGO_SETTINGS_MODULE": os.environ.get("DJANGO_SETTINGS_MODULE", "config.settings"),
-                "ARTIFACT_ROOT": str(settings.ARTIFACT_ROOT),
-                "DATA_ROOT": str(settings.DATA_ROOT),
-                "LENDING_CLUB_PATH": str(settings.LENDING_CLUB_PATH),
-                "JOBS_SYNC": "0",
-                "PYTHONUNBUFFERED": "1",
-            }
-        )
-        try:
-            with open(log_path, "wb") as log:
-                proc = subprocess.Popen(
-                    [sys.executable, "manage.py", "run_job", str(job.pk)],
-                    cwd=str(settings.BASE_DIR),
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                    env=env,
-                )
-        except OSError as exc:
-            return mark_failed(job, f"could not start worker: {exc}", traceback.format_exc())
-        threading.Thread(target=proc.wait, name=f"reap-job-{job.pk}", daemon=True).start()
-        Job.objects.filter(pk=job.pk).update(pid=proc.pid)
-        job.pid = proc.pid
-        return job
+        return get_backend().launch(job)
 
 
 def execute(job: Job | int, *, inline: bool = False) -> Job:

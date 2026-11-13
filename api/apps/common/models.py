@@ -1,4 +1,5 @@
-"""Background job bookkeeping (SPEC §3: ``python manage.py run_job <job_id>`` subprocesses)."""
+"""Background job bookkeeping (one Temporal ``BackgroundJob`` workflow per job; the worker
+runs ``python manage.py run_job <job_id>``)."""
 
 from __future__ import annotations
 
@@ -35,7 +36,10 @@ class Job(models.Model):
     progress = models.FloatField(default=0.0)
     message = models.TextField(blank=True, default="")
     log_tail = models.JSONField(default=list, blank=True)
+    #: pid of the ``run_job`` process on the worker host
     pid = models.IntegerField(null=True, blank=True)
+    #: Temporal workflow id (empty for inline jobs)
+    workflow_id = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
