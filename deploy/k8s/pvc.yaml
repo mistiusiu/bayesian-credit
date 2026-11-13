@@ -22,3 +22,15 @@ spec:
   resources:
     requests:
       storage: 2Gi
+---
+# Temporal server state (workflow histories, schedules).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bc-temporal
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi

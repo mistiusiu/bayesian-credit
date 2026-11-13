@@ -1,0 +1,57 @@
+# Temporal server for the job workflows: the single-binary dev server with SQLite persistence on
+# a PVC, plus the web UI. Enough for one research cluster; point TEMPORAL_ADDRESS (configmap) at
+# a production Temporal cluster (helm chart temporalio/temporal) or Temporal Cloud to replace it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal
+  labels: { app: temporal, app.kubernetes.io/part-of: bayesian-credit }
+spec:
+  replicas: 1                     # SQLite-backed: exactly one
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: temporal }
+  template:
+    metadata:
+      labels: { app: temporal }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000 }
+      containers:
+        - name: temporal
+          image: temporalio/temporal:1.10.0
+          args:
+            - server
+            - start-dev
+            - --ip=0.0.0.0
+            - --db-filename=/var/lib/temporal/temporal.db
+            - --namespace=default
+            - --log-level=warn
+          ports:
+            - { containerPort: 7233, name: grpc }
+            - { containerPort: 8233, name: ui }
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/temporal }
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "1Gi" }
+          readinessProbe:
+            tcpSocket: { port: grpc }
+            periodSeconds: 10
+          livenessProbe:
+            exec: { command: ["temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"] }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+      volumes:
+        - name: state
+          persistentVolumeClaim: { claimName: bc-temporal }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  labels: { app: temporal }
+spec:
+  selector: { app: temporal }
+  ports:
+    - { name: grpc, port: 7233, targetPort: grpc, appProtocol: grpc }
+    - { name: ui, port: 8233, targetPort: ui }

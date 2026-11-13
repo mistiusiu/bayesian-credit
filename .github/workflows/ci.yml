@@ -36,6 +36,8 @@ jobs:
       - run: ruff check api
       - run: cd api && python manage.py check
       - run: cd api && pytest -q
+        env:
+          BC_REQUIRE_TEMPORAL: "1"   # tests/test_temporal.py downloads the Temporal dev server
 
   frontend:
     name: research console

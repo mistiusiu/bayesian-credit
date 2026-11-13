@@ -1,4 +1,4 @@
-# Bayesian Credit — API + simulation worker image
+# Bayesian Credit — API + Temporal job worker image (entrypoint modes: serve, worker, …)
 # Build from the repository root:  docker build -f deploy/docker/Dockerfile.api -t bayesian-credit-api .
 FROM python:3.14-slim
 

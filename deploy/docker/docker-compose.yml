@@ -1,26 +1,84 @@
 # docker compose -f deploy/docker/docker-compose.yml up --build
-# API:      http://localhost:8000/api/docs/
-# Console:  http://localhost:8080
+# API:          http://localhost:8000/api/docs/
+# Console:      http://localhost:8080
+# Temporal UI:  http://localhost:8233   (every ingest / fit / portfolio / simulation is a workflow)
+# More workers: docker compose -f deploy/docker/docker-compose.yml up --scale worker=2
 # Optional Postgres: docker compose --profile postgres up  (and set DATABASE_URL below)
 name: bayesian-credit
+
+x-app-env: &app-env
+  DJANGO_DEBUG: "0"
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
+  DJANGO_ALLOWED_HOSTS: "*"
+  CORS_ALLOW_ALL_ORIGINS: "1"
+  # DATABASE_URL: postgres://bc:bc@postgres:5432/bc
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TEMPORAL_TASK_QUEUE: bayesian-credit-jobs
+  TEMPORAL_UI_URL: http://localhost:8233
+
+x-app-volumes: &app-volumes
+  - ../../data:/app/data          # Lending Club file, parquet caches, fit artifacts, simulation run dirs
+  - api-db:/app/api/db            # sqlite (when DATABASE_URL is unset), shared by the API and the workers
+
 services:
+  temporal:
+    # Temporal dev server (single binary, SQLite persistence) + web UI. Swap for a production
+    # Temporal cluster or Temporal Cloud by pointing TEMPORAL_ADDRESS elsewhere.
+    image: temporalio/temporal:1.10.0
+    command:
+      - server
+      - start-dev
+      - --ip=0.0.0.0
+      - --db-filename=/home/temporal/temporal.db
+      - --namespace=default
+      - --log-level=warn
+    volumes:
+      - temporal-data:/home/temporal
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   api:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.api
     image: bayesian-credit-api:local
     environment:
-      DJANGO_DEBUG: "0"
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
-      DJANGO_ALLOWED_HOSTS: "*"
-      CORS_ALLOW_ALL_ORIGINS: "1"
-      # DATABASE_URL: postgres://bc:bc@postgres:5432/bc
+      <<: *app-env
       GUNICORN_WORKERS: "2"
-    volumes:
-      - ../../data:/app/data          # Lending Club file, parquet caches, fit artifacts, simulation run dirs
-      - api-db:/app/api/db            # sqlite (when DATABASE_URL is unset)
+    volumes: *app-volumes
     ports:
       - "8000:8000"
+    depends_on:
+      temporal: { condition: service_healthy }
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4g
+    restart: unless-stopped
+
+  worker:
+    # Runs every background job: `manage.py temporal_worker` supervises one `run_job` process per job.
+    image: bayesian-credit-api:local
+    command: ["worker"]
+    environment:
+      <<: *app-env
+      TEMPORAL_WORKER_CONCURRENCY: "2"
+    volumes: *app-volumes
+    depends_on:
+      temporal: { condition: service_healthy }
+      api: { condition: service_started }     # the API container applies the migrations
+    healthcheck:
+      disable: true
+    stop_grace_period: 60s                    # a running simulation checkpoints on SIGTERM
     deploy:
       resources:
         limits:
@@ -56,3 +114,4 @@ services:
 volumes:
   api-db:
   pgdata:
+  temporal-data:

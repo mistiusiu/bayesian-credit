@@ -1,0 +1,46 @@
+# Temporal workers: execute every background job (ingest, fit, shadow portfolio, simulation).
+# Each pod runs `manage.py temporal_worker`, which supervises one `run_job` process per job
+# (TEMPORAL_WORKER_CONCURRENCY at a time). Scale with `kubectl scale deploy/worker --replicas=N`;
+# Temporal hands a job to one worker and moves it to another when a pod disappears (ingest / fit /
+# portfolio are retried; a simulation becomes `interrupted` and resumes from its checkpoint).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels: { app: worker, app.kubernetes.io/part-of: bayesian-credit }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001 }
+      terminationGracePeriodSeconds: 60   # SIGTERM → running simulations checkpoint and stop
+      affinity:
+        # bc-data / bc-db are ReadWriteOnce local-path volumes: run next to the API pod.
+        # Drop this after moving to Postgres + a ReadWriteMany volume.
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: { matchLabels: { app: api } }
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: worker
+          image: bayesian-credit-api
+          imagePullPolicy: IfNotPresent
+          args: ["worker"]
+          envFrom:
+            - configMapRef: { name: api-config }
+            - secretRef: { name: api-secrets }
+          volumeMounts:
+            - { name: data, mountPath: /app/data }
+            - { name: db, mountPath: /app/api/db }
+          resources:
+            requests: { cpu: "1", memory: "2Gi" }
+            limits:   { cpu: "4", memory: "8Gi" }   # consumer-grade worker nodes (12-16 cores / 32-44 GB aggregate)
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: bc-data }
+        - name: db
+          persistentVolumeClaim: { claimName: bc-db }
