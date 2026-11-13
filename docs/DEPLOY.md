@@ -11,7 +11,7 @@ bit-for-bit from its last checkpoint* (`docs/SIMULATION.md`).
 
 | Image | Dockerfile | Contents |
 |---|---|---|
-| `bayesian-credit-api` | `deploy/docker/Dockerfile.api` | `python:3.14-slim`, the `bayesian_credit` library, Django API (gunicorn), the Temporal job worker, simulation CLI. Entrypoint modes: `serve` (API), `worker` (Temporal worker), `run-job <job_id>`, `simulate <run_dir>`, `resume <run_dir>`, `demo`. |
+| `bayesian-credit-api` | `deploy/docker/Dockerfile.api` | `python:3.14-slim`; a Poetry build stage installs `poetry.lock` (main group: the `bayesian_credit` library, Django API, gunicorn, Temporal SDK) into `/opt/venv`; Temporal job worker, simulation CLI. Entrypoint modes: `serve` (API), `worker` (Temporal worker), `run-job <job_id>`, `simulate <run_dir>`, `resume <run_dir>`, `demo`. |
 | `postgres:17-alpine` | upstream | One PostgreSQL instance: the API database `bc` and Temporal's `temporal` (persistence) and `temporal_visibility` databases. |
 | `temporalio/server:1.32.2` · `admin-tools:1.32.2` · `ui:2.56.1` | upstream | The workflow engine every background job runs on (on PostgreSQL), its schema / namespace tooling and the web UI. |
 | `bayesian-credit-web` | `deploy/docker/Dockerfile.frontend` | Vite production build served by nginx; `/api/` is proxied to `API_UPSTREAM` (default `http://api:8000`). |
@@ -57,6 +57,12 @@ written under `data/artifacts/`, shared by the API and the workers. Passwords de
 development values; set `POSTGRES_PASSWORD`, `BC_DB_PASSWORD`, `TEMPORAL_DB_PASSWORD` and
 `DJANGO_SECRET_KEY` in the environment (or an `.env` file next to the compose file) before the
 first `up` — role passwords are applied when the `pgdata` volume is initialised.
+
+The API and worker containers run as the owner of `./data` (`HOST_UID` / `HOST_GID`, default
+`1000:1000`; export `HOST_UID=$(id -u) HOST_GID=$(id -g)` otherwise) and mount it with `:z`, so
+on SELinux hosts (Fedora) the directory is relabelled once as shared container content. Static
+files are collected at image build time, so the containers need no writable image paths.
+`API_PORT` / `WEB_PORT` move the published API (8000) and console (8080) ports.
 
 ## Kubernetes (K3s on Talos)
 
@@ -171,7 +177,7 @@ The proposal names Kafka (append-only event state) and Temporal (workflow orches
 The prototype implements the *semantics* with a file-backed append-only `events.jsonl` and
 atomic checkpoints behind an `EventSink` protocol (`core/bayesian_credit/simulation/events.py`:
 `JSONLSink` is the default; `KafkaSink` publishes the same events to a topic and needs
-`pip install "bayesian-credit[kafka]"` plus a `confluent_kafka` producer config such as
+`poetry install --with kafka` (or `pip install "bayesian-credit[kafka]"`) plus a `confluent_kafka` producer config such as
 `{"bootstrap.servers": "broker:9092"}`). Swapping the sink is a constructor argument of the
 runner's `EventStore`; the checkpoint/resume mechanism does not depend on the sink. Workflow
 orchestration is Temporal (see *Background jobs on Temporal* above): every background job is

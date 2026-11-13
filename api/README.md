@@ -12,8 +12,8 @@ directory, so a worker can be SIGKILLed (chaos) and resumed from its checkpoint.
 ## Quick start
 
 ```bash
-cd <repo> && . .venv/bin/activate          # Python 3.14; core installed: pip install -e core
-pip install -r api/requirements.txt
+cd <repo> && poetry install --with dev     # Poetry 2, Python 3.14: .venv/ with core (editable), API, dev tools
+eval $(poetry env activate)                # or prefix commands with `poetry run`
 make infra                                 # PostgreSQL :5432 + Temporal (on PostgreSQL) :7233 + UI http://localhost:8233
 cd api
 python manage.py migrate                   # into postgres://bc:bc@localhost:5432/bc (the default DATABASE_URL)
