@@ -145,6 +145,7 @@ becomes `interrupted`, ready to resume from its checkpoint.
 | `POST /datasets/` | `DatasetCreate` | 201 `Dataset` | |
 | `GET /datasets/` | | `Paginated<Dataset>` | |
 | `GET /datasets/{id}/` | | `Dataset` | |
+| `GET /datasets/catalogue/` | | `VariableOption[]` | |
 | `GET /datasets/{id}/variables/` | | `VariableRow[]` | |
 | `GET /datasets/{id}/summary/` | `?features=a,b` | `DatasetSummary` | |
 | `GET /datasets/{id}/loans/` | `?limit&offset&grade&purpose&home_ownership&resolved&search` | `Paginated<LoanRecord>` | |
@@ -250,6 +251,16 @@ queue in the last few minutes.
 | `sample_fraction` | number / null | null | `lending_club` only, (0, 1] |
 | `issue_from` / `issue_to` | epoch / null | `2012-01` / `2018-12` | inclusive; within 2007-06 … 2018-12 |
 | `shift` | `{ at: epoch, deltas: { feature: number } }` / null | null | `synthetic` only; additive shift in feature units applied to loans issued on/after `at`, e.g. `{ "at": "2016-06", "deltas": { "fico_range_low": -25, "dti": 5 } }` |
+| `exclude_variables` | string[] / null | `[]` | Table 3 variables the dataset is built **without** (ablations, e.g. the four FICO columns). Only pre-decision and interim variables are selectable (`GET /datasets/catalogue/`); 400 on an unknown or required one. Echoed in Table 3 order. |
+
+**Variable selection.** The excluded columns are dropped from `loans.parquet` after the outcomes
+are derived, and `y_group` is recomputed (a default segmentation dimension whose source is gone
+becomes the constant `"unknown"`), so nothing built on the dataset can read them. Fits on such a
+dataset reject explicit segmentation dimensions derived from an excluded variable and drop them
+from the defaults; without `annual_inc` the `pti` policy-effect feature is dropped from the
+defaults (400 if requested). Simulations reject excluded PSI features and drop them from the fit's
+defaults. Required columns (policy, disbursement, terminal, `installment`, `last_pymnt_d`) carry
+the arm, the time index and the outcome labels and cannot be excluded.
 
 ```json
 { "name": "Synthetic · 50k · seed 42", "source": "synthetic", "n": 50000, "seed": 42,
@@ -277,6 +288,22 @@ Statistics are `null` (and `status_counts` `{}`) until `status` is `ready`.
 }
 ```
 
+### 5.3a `GET /datasets/catalogue/` → `VariableOption[]`
+
+Every Table 3 variable with `selectable` (may be excluded), `required_reason` (why not) and
+`uses`: the model components that read it under the default configuration (segmentation
+dimensions, default PSI features, guardrails, policy effect, prepayment realisation); empty =
+context only.
+
+```json
+[ { "name": "fico_range_low", "stage": "pre_decision", "primary_use": "Credit-risk estimation", "kind": "numeric",
+    "selectable": true, "required_reason": null,
+    "uses": ["segmentation: fico_band", "PSI Sentinel (default feature)"] },
+  { "name": "installment", "stage": "pre_decision", "primary_use": "Repayment burden", "kind": "numeric",
+    "selectable": false, "required_reason": "A function of the policy arm, not borrower information; feeds the PTI policy effect",
+    "uses": [] } ]
+```
+
 ### 5.3 `GET /datasets/{id}/variables/` → `VariableRow[]`
 
 All 60 Table 3 variables in Table 3 order (`core/bayesian_credit/data/schema.py::RETAINED_VARIABLES`),
@@ -284,13 +311,14 @@ not paginated. 409 until the dataset is ready.
 
 ```json
 [ { "name": "annual_inc", "stage": "pre_decision", "primary_use": "Borrower context / risk estimation",
-    "kind": "numeric", "present": true, "dtype": "float64", "null_share": 0 },
+    "kind": "numeric", "present": true, "dtype": "float64", "null_share": 0, "excluded": false },
   { "name": "loan_status", "stage": "terminal", "primary_use": "Default and credit-state outcome",
-    "kind": "categorical", "present": true, "dtype": "string", "null_share": 0 } ]
+    "kind": "categorical", "present": true, "dtype": "string", "null_share": 0, "excluded": false } ]
 ```
 
 `dtype` is the pandas dtype string (`float64`, `int64`, `string`, `datetime64[ns]`) or `null`
-when absent; `null_share` is null when absent.
+when absent; `null_share` is null when absent. `excluded` marks variables dropped by the dataset's
+`exclude_variables` (they are also absent).
 
 ### 5.4 `GET /datasets/{id}/summary/?features=a,b` → `DatasetSummary`
 

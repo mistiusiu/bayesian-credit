@@ -394,6 +394,15 @@ aliases are `generate_table`, module‑level `generate(n, seed, **kw)`, and
 
 ## 7. Assumptions beyond the SPEC
 
+- **Variable selection (ablations).** `prepare_dataset(..., exclude_variables=[...])` /
+  `pipeline.apply_variable_selection` drop selectable Table 3 columns (pre-decision and interim,
+  `schema.SELECTABLE_COLUMNS`) after the outcomes are derived and recompute `y_group`, so e.g. a
+  "no FICO" dataset stores neither the FICO range nor a group key built from it.
+  `schema.REQUIRED_COLUMNS` (policy, disbursement, terminal, `installment`, `last_pymnt_d`) cannot
+  be excluded: they define the arm, the time index and the outcome labels. Note that `grade` /
+  `sub_grade` are Lending Club's own grade, priced largely off FICO; a FICO-free ablation should
+  drop them too (the UI's "No FICO, no LC grade" preset).
+
 - **Data types.** The canonical string dtype is pandas‑3 `str` (NaN‑missing).
   `y_group` uses it too, whereas `Segmenter.assign` itself returns `"string"`.
 - **Months on book.** `y_months_on_book` for resolved loans with no `last_pymnt_d` is the
