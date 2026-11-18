@@ -4,6 +4,7 @@ import { ProgressBar } from '@/components/ui/Progress';
 import { Empty, Loading } from '@/components/ui/States';
 import { cn } from '@/lib/cn';
 import { fmt } from '@/lib/format';
+import { ablationTags } from '@/lib/variables';
 
 export function DatasetCards({ datasets, selectedId, onSelect, loading }: { datasets: Dataset[]; selectedId: number | null; onSelect: (id: number) => void; loading: boolean }) {
   if (loading && !datasets.length) return <Loading label="Loading datasets" />;
@@ -33,6 +34,12 @@ export function DatasetCards({ datasets, selectedId, onSelect, loading }: { data
                     <Pill>{d.source === 'synthetic' ? 'synthetic' : 'lending club'}</Pill>
                     {d.params.shift && <Pill>shift {d.params.shift.at}</Pill>}
                     <Pill>seed {d.params.seed ?? '—'}</Pill>
+                    {d.source === 'lending_club' && !d.params.max_rows && !d.params.sample_fraction && <Pill>entire file</Pill>}
+                    {ablationTags(d.params.exclude_variables).map((t) => (
+                      <Pill key={t} className="border border-accent-strong/40 bg-accent-wash text-ink">
+                        {t}
+                      </Pill>
+                    ))}
                   </div>
                 </div>
                 <StatusBadge status={d.status} />

@@ -17,7 +17,7 @@ from apps.common.utils import csv_list, parse_bool, parse_int
 
 from . import services
 from .models import Dataset
-from .serializers import DatasetCreateSerializer, DatasetSerializer, VariableRowSerializer
+from .serializers import DatasetCreateSerializer, DatasetSerializer, VariableOptionSerializer, VariableRowSerializer
 
 
 def ready_dataset(ds: Dataset) -> Dataset:
@@ -76,6 +76,15 @@ class DatasetViewSet(
         return Response(DatasetSerializer(ds).data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
+        summary="Table 3 catalogue: which variables a dataset may exclude and what each one feeds",
+        tags=["datasets"],
+        responses=VariableOptionSerializer(many=True),
+    )
+    @action(detail=False, methods=["get"], pagination_class=None, filter_backends=[])
+    def catalogue(self, request):
+        return Response(services.variable_catalogue())
+
+    @extend_schema(
         summary="Table 3 variables with presence / dtype / null share",
         tags=["datasets"],
         responses=VariableRowSerializer(many=True),
@@ -88,7 +97,7 @@ class DatasetViewSet(
             import pandas as pd
 
             rows = services.variable_rows(pd.read_parquet(ds.parquet))
-        return Response(rows)
+        return Response(services.mark_excluded(rows, services.excluded_variables(ds)))
 
     @extend_schema(
         summary="Feature distributions, monthly arrivals, status / grade / term counts",

@@ -19,7 +19,9 @@ from bayesian_credit.data.schema import (
     PERCENT_STRING_COLUMNS,
     POLICY_COLUMNS,
     PRE_DECISION_COLUMNS,
+    REQUIRED_COLUMNS,
     RETAINED_VARIABLES,
+    SELECTABLE_COLUMNS,
     STATUS_CURRENT,
     STATUS_DEFAULTED,
     STATUS_DELINQUENT,
@@ -31,6 +33,8 @@ from bayesian_credit.data.schema import (
     BorrowerContext,
     LeakageGuard,
     columns_for,
+    drop_variables,
+    validate_exclusion,
 )
 from bayesian_credit.exceptions import LeakageError
 from bayesian_credit.types import Stage
@@ -213,3 +217,26 @@ class TestBorrowerContext:
         ctx = BorrowerContext.from_row({"loan_id": 3, "annual_inc": 50_000.0, "issue_d": pd.NaT, "total_pymnt": 1.0})
         assert ctx.issue_date is None
         assert dict(ctx.features) == {"annual_inc": 50_000.0}
+
+
+# ----------------------------------------------------------------------------- variable selection
+def test_required_and_selectable_columns_partition_table3():
+    assert set(REQUIRED_COLUMNS) | set(SELECTABLE_COLUMNS) == set(ALL_RETAINED_COLUMNS)
+    assert not set(REQUIRED_COLUMNS) & set(SELECTABLE_COLUMNS)
+    # only pre-decision and interim columns are optional; policy/disbursement/terminal never are
+    assert {VARIABLES_BY_NAME[c].stage for c in SELECTABLE_COLUMNS} == {Stage.PRE_DECISION, Stage.INTERIM}
+    assert {"installment", "last_pymnt_d"} <= set(REQUIRED_COLUMNS)
+
+
+def test_validate_exclusion_orders_dedupes_and_rejects_required_or_unknown():
+    assert validate_exclusion(["sub_grade", "fico_range_low", "sub_grade"]) == ("fico_range_low", "sub_grade")
+    with pytest.raises(ValueError, match="cannot be excluded: int_rate"):
+        validate_exclusion(["int_rate"])
+    with pytest.raises(ValueError, match="unknown variable"):
+        validate_exclusion(["credit_score"])
+
+
+def test_drop_variables_ignores_absent_columns():
+    df = pd.DataFrame({"loan_id": [1], "fico_range_low": [700.0], "dti": [10.0]})
+    assert list(drop_variables(df, ["fico_range_low", "fico_range_high"]).columns) == ["loan_id", "dti"]
+    assert drop_variables(df, []) is df

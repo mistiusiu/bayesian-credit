@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bayesian_credit.data.schema import NUMERIC_COLUMNS, PRE_DECISION_COLUMNS
+from bayesian_credit.data.schema import NUMERIC_COLUMNS, PRE_DECISION_COLUMNS, validate_exclusion
 from bayesian_credit.data.synthetic import DEFAULT_SHIFT, DEFAULT_SHIFT_AT
 from django.conf import settings
 from rest_framework import serializers
@@ -39,6 +39,13 @@ class DatasetCreateSerializer(serializers.Serializer):
     issue_to = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     shift = serializers.JSONField(required=False, allow_null=True)
     shift_at = serializers.CharField(required=False, allow_null=True, write_only=True, help_text="alias of shift.at")
+    exclude_variables = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_null=True,
+        help_text="Pre-decision / interim Table 3 variables dropped from the dataset (ablations, e.g. no FICO); "
+        "see GET /datasets/catalogue/ for the selectable ones",
+    )
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -123,6 +130,11 @@ class DatasetCreateSerializer(serializers.Serializer):
                     except (TypeError, ValueError):
                         errors.setdefault("shift", []).append(f"shift.deltas.{key} must be a number.")
                 shift = {"at": at, "deltas": clean_deltas or dict(DEFAULT_SHIFT)}
+        exclude: tuple[str, ...] = ()
+        try:
+            exclude = validate_exclusion(attrs.get("exclude_variables") or ())
+        except ValueError as exc:
+            errors.setdefault("exclude_variables", []).append(str(exc))
         if errors:
             raise serializers.ValidationError(errors)
 
@@ -137,6 +149,7 @@ class DatasetCreateSerializer(serializers.Serializer):
             "issue_from": issue_from,
             "issue_to": issue_to,
             "shift": shift,
+            "exclude_variables": list(exclude),
         }
 
 
@@ -171,6 +184,7 @@ class DatasetSerializer(serializers.ModelSerializer):
     def to_representation(self, instance: Dataset):
         data = super().to_representation(instance)
         data["params"] = dict(instance.params or {})
+        data["params"].setdefault("exclude_variables", [])
         if data["status"] != "ready":
             for key in ("n_loans", "n_resolved", "issue_min", "issue_max", "resolved_share", "default_rate"):
                 data[key] = None
@@ -186,3 +200,18 @@ class VariableRowSerializer(serializers.Serializer):
     present = serializers.BooleanField()
     dtype = serializers.CharField(allow_null=True)
     null_share = serializers.FloatField(allow_null=True)
+    excluded = serializers.BooleanField(help_text="Dropped by the dataset's variable selection")
+
+
+class VariableOptionSerializer(serializers.Serializer):
+    """GET /datasets/catalogue/: every Table 3 variable and whether a dataset may exclude it."""
+
+    name = serializers.CharField()
+    stage = serializers.ChoiceField(choices=["pre_decision", "policy", "disbursement", "interim", "terminal"])
+    primary_use = serializers.CharField()
+    kind = serializers.ChoiceField(choices=["numeric", "categorical", "date"])
+    selectable = serializers.BooleanField()
+    required_reason = serializers.CharField(allow_null=True, help_text="Why the pipeline cannot run without it")
+    uses = serializers.ListField(
+        child=serializers.CharField(), help_text="Model components that read it under the default configuration"
+    )

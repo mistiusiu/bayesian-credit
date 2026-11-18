@@ -65,6 +65,7 @@ def e2e(django_db_setup, django_db_blocker):
         out["dataset"] = ds
         dsid = ds["id"]
         out["variables"] = _ok(c.get(f"/api/v1/datasets/{dsid}/variables/"))
+        out["catalogue"] = _ok(c.get("/api/v1/datasets/catalogue/"))
         out["summary"] = _ok(c.get(f"/api/v1/datasets/{dsid}/summary/"))
         out["loans"] = _ok(c.get(f"/api/v1/datasets/{dsid}/loans/", {"grade": "B", "limit": 5}))
 

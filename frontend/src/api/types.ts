@@ -189,6 +189,8 @@ export interface DatasetCreate {
   issue_from?: Epoch | null;
   issue_to?: Epoch | null;
   shift?: DistributionShift | null;
+  /** Pre-decision / interim Table 3 variables dropped from the dataset (ablations, e.g. no FICO). Echoed in Table 3 order. */
+  exclude_variables?: string[] | null;
 }
 
 /** GET /datasets/ (Paginated) and GET /datasets/{id}/ */
@@ -224,6 +226,21 @@ export interface VariableRow {
   /** pandas dtype string ("float64", "string", "datetime64[ns]", "int64") or null when absent. */
   dtype: string | null;
   null_share: Fraction | null;
+  /** Dropped by the dataset's variable selection (then `present` is false). */
+  excluded: boolean;
+}
+
+/** GET /datasets/catalogue/ → VariableOption[] (every Table 3 variable, Table 3 order). */
+export interface VariableOption {
+  name: string;
+  stage: Stage;
+  primary_use: string;
+  kind: VariableKind;
+  /** false = the pipeline cannot run without it (policy, disbursement, terminal, installment, last_pymnt_d). */
+  selectable: boolean;
+  required_reason: string | null;
+  /** Model components that read it under the default configuration; empty = context only. */
+  uses: string[];
 }
 
 export type FeatureUnit = 'usd' | 'fraction' | 'pct' | 'count' | 'score' | 'years' | 'months' | 'none';

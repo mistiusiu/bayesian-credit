@@ -107,6 +107,19 @@ class SimulationCreateSerializer(serializers.Serializer):
             errors.setdefault("psi", []).append(
                 f"PSI features must be pre-decision columns; unknown: {', '.join(unknown)}"
             )
+        excluded = set((ds.params or {}).get("exclude_variables") or [])
+        if excluded and "features" in given:
+            gone = [f for f in psi["features"] if f in excluded]
+            if gone:
+                errors.setdefault("psi", []).append(
+                    f"PSI features excluded from dataset #{ds.pk}: {', '.join(gone)}."
+                )
+        elif excluded:  # the fit's defaults: monitor what is left
+            psi["features"] = [f for f in psi["features"] if f not in excluded]
+            if not psi["features"]:
+                errors.setdefault("psi", []).append(
+                    f"Every default PSI feature is excluded from dataset #{ds.pk}; choose features."
+                )
         if errors:
             raise serializers.ValidationError(errors)
         attrs["fit_obj"] = fit

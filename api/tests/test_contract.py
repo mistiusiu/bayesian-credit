@@ -105,6 +105,7 @@ def test_main_interfaces(ts_interfaces, e2e):
     [
         ("Health", ("health",)),
         ("VariableRow", ("variables", 0)),
+        ("VariableOption", ("catalogue", 0)),
         ("DatasetSummary", ("summary",)),
         ("NumericFeatureSummary", ("summary", "features", 0)),
         ("MonthlyArrival", ("summary", "monthly_arrivals", 0)),

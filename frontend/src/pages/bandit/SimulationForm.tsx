@@ -6,6 +6,8 @@ import { Chips } from '@/components/ui/Chips';
 import { Disclosure } from '@/components/ui/Disclosure';
 import { Field, FormError, NumberInput, Select, TextInput } from '@/components/ui/Field';
 import { Segmented } from '@/components/ui/Segmented';
+import { Toggle } from '@/components/ui/Toggle';
+import { fmt } from '@/lib/format';
 import { BREAKER_MODES, DEFAULT_HINDSIGHT, FEEDBACK_MODES, POLICIES, policyBlurb, policyLabel, PSI_FEATURES, REVIEW_ACTIONS } from '@/lib/domain';
 
 const HINDSIGHT: { value: HindsightSample; label: string; title: string }[] = [
@@ -13,17 +15,23 @@ const HINDSIGHT: { value: HindsightSample; label: string; title: string }[] = [
   { value: 'resolved', label: 'All resolved', title: 'Every resolved loan: biased towards early defaults' },
 ];
 
-export function SimulationForm({ fitId, onCreated }: { fitId: number | null; onCreated: (s: Simulation) => void }) {
+const PSI_OPTIONS = [...PSI_FEATURES, 'emp_length', 'verification_status'];
+
+export function SimulationForm({ fitId, excluded = [], datasetLoans = null, onCreated }: { fitId: number | null; excluded?: string[]; datasetLoans?: number | null; onCreated: (s: Simulation) => void }) {
   const [name, setName] = useState('');
   const [policies, setPolicies] = useState<PolicyName[]>(['thompson', 'ucb1', 'epsilon_greedy', 'historical', 'random']);
   const [feedback, setFeedback] = useState<FeedbackMode>('simulated');
   const [start, setStart] = useState('2015-01');
   const [end, setEnd] = useState('2018-12');
+  const [allLoans, setAllLoans] = useState(false);
   const [maxLoans, setMaxLoans] = useState<number | null>(50000);
   const [seed, setSeed] = useState<number | null>(42);
   const [interimMonths, setInterimMonths] = useState<number | null>(12);
   const [interimWeight, setInterimWeight] = useState<number | null>(0.5);
-  const [features, setFeatures] = useState<string[]>(PSI_FEATURES);
+  const [featuresState, setFeatures] = useState<string[]>(PSI_FEATURES);
+  // PSI can only monitor variables the dataset kept
+  const psiOptions = PSI_OPTIONS.filter((f) => !excluded.includes(f));
+  const features = featuresState.filter((f) => psiOptions.includes(f));
   const [windowMonths, setWindowMonths] = useState<number | null>(3);
   const [watch, setWatch] = useState<number | null>(0.1);
   const [breaker, setBreaker] = useState<number | null>(0.25);
@@ -45,7 +53,7 @@ export function SimulationForm({ fitId, onCreated }: { fitId: number | null; onC
         feedback_mode: feedback,
         start,
         end,
-        max_loans: maxLoans,
+        max_loans: allLoans ? null : maxLoans,
         seed: seed ?? 42,
         interim_months: interimMonths ?? 12,
         interim_weight: interimWeight ?? 0.5,
@@ -71,10 +79,16 @@ export function SimulationForm({ fitId, onCreated }: { fitId: number | null; onC
           <Field label="Last epoch" hint="YYYY-MM, inclusive" error={errs.end}>
             {(id, d, inv) => <TextInput id={id} aria-describedby={d} aria-invalid={inv} value={end} onChange={(e) => setEnd(e.target.value)} />}
           </Field>
-          <Field label="Max loans" hint="sampled with the seed; empty = all" error={errs.max_loans}>
-            {(id, d) => <NumberInput id={id} aria-describedby={d} min={100} step={1000} value={maxLoans} onValue={setMaxLoans} />}
+          <Field label="Max loans" hint={allLoans ? 'every loan in the window' : 'pilot: sampled with the seed'} error={errs.max_loans}>
+            {(id, d) => <NumberInput id={id} aria-describedby={d} min={100} step={1000} disabled={allLoans} value={allLoans ? null : maxLoans} onValue={setMaxLoans} />}
           </Field>
         </div>
+        <Toggle
+          checked={allLoans}
+          onChange={setAllLoans}
+          label="Every loan in the window"
+          description={`Stream the whole dataset between the first and last epoch instead of a seeded pilot sample${datasetLoans ? ` (the dataset holds ${fmt.int(datasetLoans)} loans in total)` : ''}. Full runs take proportionally longer; they checkpoint and resume like any other.`}
+        />
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-ink-2">Policies</span>
           <Chips<PolicyName> label="Policies" options={POLICIES.map((p) => ({ value: p, label: policyLabel(p), title: policyBlurb(p) }))} value={policies} onChange={setPolicies} />
@@ -99,7 +113,8 @@ export function SimulationForm({ fitId, onCreated }: { fitId: number | null; onC
           </fieldset>
           <fieldset className="space-y-3 rounded-md border border-line p-3">
             <legend className="px-1 text-xs font-semibold text-ink">PSI Sentinel</legend>
-            <Chips size="sm" label="Monitored features" options={[...PSI_FEATURES, 'emp_length', 'verification_status'].map((f) => ({ value: f, label: f }))} value={features} onChange={setFeatures} />
+            <Chips size="sm" label="Monitored features" options={psiOptions.map((f) => ({ value: f, label: f }))} value={features} onChange={setFeatures} />
+            {errs.psi && <p className="text-2xs text-delta-bad">{errs.psi.join(' ')}</p>}
             <div className="grid grid-cols-3 gap-3">
               <Field label="Window (months)" error={errs['psi.window_months']}>{(id) => <NumberInput id={id} min={1} value={windowMonths} onValue={setWindowMonths} />}</Field>
               <Field label="Watch ≥" error={errs['psi.thresholds']}>{(id) => <NumberInput id={id} min={0} step={0.01} value={watch} onValue={setWatch} />}</Field>
@@ -122,7 +137,7 @@ export function SimulationForm({ fitId, onCreated }: { fitId: number | null; onC
         </div>
         <FormError message={create.error && !Object.keys(errs).length ? create.error.message : null} />
         <div className="flex items-center gap-3">
-          <Button type="submit" variant="primary" icon="play" loading={create.isPending} disabled={fitId === null || !policies.length}>
+          <Button type="submit" variant="primary" icon="play" loading={create.isPending} disabled={fitId === null || !policies.length || !features.length}>
             Start simulation
           </Button>
           <span className="text-xs text-muted">{fitId === null ? 'Select a ready fit first.' : `with fit #${fitId}`}</span>

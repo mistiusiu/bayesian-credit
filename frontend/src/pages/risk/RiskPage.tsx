@@ -30,7 +30,7 @@ export function RiskPage() {
         title="Risk models"
         description="Two-Stage Beta-Beta: hierarchical Beta-Bernoulli default (global → group → leaf, κ shrinkage) and Beta method-of-moments recovery given default; validated on a temporal holdout."
       />
-      <FitForm datasetId={sel.datasetId} onCreated={(f) => sel.setFit(f.id)} />
+      <FitForm datasetId={sel.datasetId} excluded={sel.dataset?.params.exclude_variables ?? []} onCreated={(f) => sel.setFit(f.id)} />
       <div className="mt-4">
         <Card title="Fits" subtitle={sel.dataset ? `on dataset #${sel.dataset.id} ${sel.dataset.name}` : undefined} bodyClassName="p-0">
           <FitList fits={sel.fits} selectedId={sel.fitId} onSelect={sel.setFit} loading={sel.loading} />

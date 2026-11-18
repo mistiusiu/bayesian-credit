@@ -23,7 +23,12 @@ export function BanditPage() {
         title="Bandit lab"
         description="Historical borrowers replayed month by month; contextual Thompson sampling competes with UCB1, ε-greedy, random and the historical policy under delayed interim and terminal feedback."
       />
-      <SimulationForm fitId={sel.fit?.status === 'ready' ? sel.fitId : null} onCreated={(s) => sel.setSim(s.id)} />
+      <SimulationForm
+        fitId={sel.fit?.status === 'ready' ? sel.fitId : null}
+        excluded={sel.dataset?.params.exclude_variables ?? []}
+        datasetLoans={sel.dataset?.n_loans ?? null}
+        onCreated={(s) => sel.setSim(s.id)}
+      />
       <div className="mt-4">
         <Card title="Runs" subtitle={sel.fit ? `with fit #${sel.fit.id} ${sel.fit.name}` : undefined} bodyClassName="p-0">
           <RunsTable sims={sel.sims} selectedId={sel.simId} onSelect={sel.setSim} />

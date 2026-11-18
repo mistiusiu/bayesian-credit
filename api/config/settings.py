@@ -255,6 +255,7 @@ SPECTACULAR_SETTINGS = {
         "ReviewActionEnum": ["resume", "resegment", "rollback"],
         "DataSourceEnum": ["synthetic", "lending_club"],
         "StageEnum": ["pre_decision", "policy", "disbursement", "interim", "terminal"],
+        "VariableKindEnum": ["numeric", "categorical", "date"],
         "HierarchyLevelEnum": ["global", "group", "leaf"],
         "TransitionStructureEnum": ["proposal", "extended"],
         "PsiAggregateEnum": ["max", "mean"],

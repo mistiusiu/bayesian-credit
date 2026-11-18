@@ -48,7 +48,9 @@ from .schema import (
     OUTCOME_COLUMNS,
     POLICY_COLUMNS,
     PRE_DECISION_COLUMNS,
+    REQUIRED_COLUMNS,
     RETAINED_VARIABLES,
+    SELECTABLE_COLUMNS,
     STATUS_CURRENT,
     STATUS_DEFAULTED,
     STATUS_DELINQUENT,
@@ -59,6 +61,8 @@ from .schema import (
     BorrowerContext,
     LeakageGuard,
     Variable,
+    drop_variables,
+    validate_exclusion,
 )
 from .segmentation import Segmenter
 from .synthetic import DEFAULT_SHIFT, DEFAULT_SHIFT_AT, SyntheticLendingClub
@@ -140,7 +144,9 @@ __all__ = [
     "OUTCOME_COLUMNS",
     "POLICY_COLUMNS",
     "PRE_DECISION_COLUMNS",
+    "REQUIRED_COLUMNS",
     "RETAINED_VARIABLES",
+    "SELECTABLE_COLUMNS",
     "SOURCES",
     "STATUS_CURRENT",
     "STATUS_DEFAULTED",
@@ -165,6 +171,7 @@ __all__ = [
     "canonicalize",
     "default_lending_club_path",
     "derive_outcomes",
+    "drop_variables",
     "generate_synthetic",
     "interim_state",
     "load_loans",
@@ -176,5 +183,6 @@ __all__ = [
     "subsample",
     "summarize",
     "temporal_split",
+    "validate_exclusion",
     "validate_loan_table",
 ]

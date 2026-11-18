@@ -1,5 +1,6 @@
 /** Table 3 metadata and the Lending Club-like distributions the mock generator draws from. */
-import type { Stage, VariableKind } from '@/api/types';
+import type { Stage, VariableKind, VariableOption } from '@/api/types';
+import { DEFAULT_FIT_CONFIG, PSI_FEATURES, SEGMENTATION_DIMENSIONS } from '@/lib/domain';
 
 export interface VariableMeta {
   name: string;
@@ -157,3 +158,40 @@ export const YEAR_VOLUME: Record<number, number> = {
 
 /** Snapshot month: issue_d ends 2018-12, last_pymnt_d runs to 2019-03. */
 export const SNAPSHOT = '2019-03';
+
+/** Mirrors api/apps/datasets/services.py REQUIRED_REASON / core schema.REQUIRED_COLUMNS. */
+const REQUIRED_REASON: Record<string, string> = {
+  policy: 'Defines the lending-policy arm (amount, rate, term)',
+  disbursement: 'Realised exposure and the time index of the replay',
+  terminal: 'Outcome label: default, recovery and realised revenue are derived from it',
+  installment: 'A function of the policy arm, not borrower information; feeds the PTI policy effect',
+  last_pymnt_d: 'Months on book, resolution date and the MCTM credit-state panel are derived from it',
+};
+const OTHER_USES: Record<string, string[]> = {
+  annual_inc: ['guardrails: PTI, exposure, total DTI', 'policy effect: PTI'],
+  dti: ['guardrails: total DTI'],
+  sub_grade: ['guardrails: rate-corridor reference rate', 'prepayment realisation (fallback)'],
+  grade: ['guardrails: reference-rate fallback', 'prepayment realisation by grade'],
+};
+
+export const isRequiredVariable = (v: VariableMeta) => v.stage === 'policy' || v.stage === 'disbursement' || v.stage === 'terminal' || v.name in REQUIRED_REASON;
+export const SELECTABLE_VARIABLES = new Set(TABLE3.filter((v) => !isRequiredVariable(v)).map((v) => v.name));
+
+export function variableCatalogue(): VariableOption[] {
+  const defaultDims = DEFAULT_FIT_CONFIG.segmentation.dimensions;
+  return TABLE3.map((v) => {
+    const required = isRequiredVariable(v);
+    const uses = SEGMENTATION_DIMENSIONS.filter((d) => d.source === v.name).map((d) => `segmentation: ${d.key}${defaultDims.includes(d.key) ? ' (default)' : ''}`);
+    if (PSI_FEATURES.includes(v.name)) uses.push('PSI Sentinel (default feature)');
+    uses.push(...(OTHER_USES[v.name] ?? []));
+    return {
+      name: v.name,
+      stage: v.stage,
+      primary_use: v.primary_use,
+      kind: v.kind,
+      selectable: !required,
+      required_reason: required ? (REQUIRED_REASON[v.name] ?? REQUIRED_REASON[v.stage]) : null,
+      uses,
+    };
+  });
+}

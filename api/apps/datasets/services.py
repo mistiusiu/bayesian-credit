@@ -15,8 +15,14 @@ from typing import Any
 import duckdb
 import numpy as np
 import pandas as pd
-from bayesian_credit.config import RewardConfig
-from bayesian_credit.data.schema import PRE_DECISION_COLUMNS, RETAINED_VARIABLES, VARIABLES_BY_NAME
+from bayesian_credit.config import PSIConfig, RewardConfig, SegmentationConfig
+from bayesian_credit.data.schema import (
+    PRE_DECISION_COLUMNS,
+    REQUIRED_COLUMNS,
+    RETAINED_VARIABLES,
+    VARIABLES_BY_NAME,
+)
+from bayesian_credit.data.segmentation import DIMENSIONS
 from bayesian_credit.rewards.compound import CompoundRewardFunction
 from rest_framework.exceptions import ValidationError
 
@@ -136,6 +142,65 @@ _REWARD_FN = CompoundRewardFunction(RewardConfig())
 
 
 # ----------------------------------------------------------------------------- variables
+#: Why a required column cannot be excluded (by column, else by stage).
+REQUIRED_REASON: dict[str, str] = {
+    "policy": "Defines the lending-policy arm (amount, rate, term)",
+    "disbursement": "Realised exposure and the time index of the replay",
+    "terminal": "Outcome label: default, recovery and realised revenue are derived from it",
+    "installment": "A function of the policy arm, not borrower information; feeds the PTI policy effect",
+    "last_pymnt_d": "Months on book, resolution date and the MCTM credit-state panel are derived from it",
+}
+#: Model components outside segmentation / PSI that read a pre-decision column.
+OTHER_USES: dict[str, tuple[str, ...]] = {
+    "annual_inc": ("guardrails: PTI, exposure, total DTI", "policy effect: PTI"),
+    "dti": ("guardrails: total DTI",),
+    "sub_grade": ("guardrails: rate-corridor reference rate", "prepayment realisation (fallback)"),
+    "grade": ("guardrails: reference-rate fallback", "prepayment realisation by grade"),
+}
+
+
+def variable_uses(name: str) -> list[str]:
+    """Model components that read ``name`` under the default configuration."""
+    default_dims = SegmentationConfig().dimensions
+    uses = [
+        f"segmentation: {dim}" + (" (default)" if dim in default_dims else "")
+        for dim, (src, _) in DIMENSIONS.items()
+        if src == name
+    ]
+    if name in PSIConfig().features:
+        uses.append("PSI Sentinel (default feature)")
+    uses.extend(OTHER_USES.get(name, ()))
+    return uses
+
+
+def variable_catalogue() -> list[dict[str, Any]]:
+    """types.ts ``VariableOption`` for every Table 3 variable, in Table 3 order."""
+    return [
+        {
+            "name": v.name,
+            "stage": v.stage.value,
+            "primary_use": v.primary_use,
+            "kind": v.kind,
+            "selectable": v.name not in REQUIRED_COLUMNS,
+            "required_reason": (REQUIRED_REASON.get(v.name) or REQUIRED_REASON.get(v.stage.value))
+            if v.name in REQUIRED_COLUMNS
+            else None,
+            "uses": variable_uses(v.name),
+        }
+        for v in RETAINED_VARIABLES
+    ]
+
+
+def excluded_variables(ds: Dataset) -> list[str]:
+    return list((ds.params or {}).get("exclude_variables") or [])
+
+
+def mark_excluded(rows: list[dict[str, Any]], excluded: Iterable[str]) -> list[dict[str, Any]]:
+    """``VariableRow``s with the ``excluded`` flag (rows stored before it existed included)."""
+    drop = set(excluded)
+    return [{**r, "excluded": r["name"] in drop} for r in rows]
+
+
 def dtype_name(dtype: Any) -> str:
     s = str(dtype)
     if s in {"str", "string", "string[python]", "string[pyarrow]"} or (
@@ -264,7 +329,11 @@ def validate_features(features: Sequence[str]) -> list[str]:
 
 def build_summary(ds: Dataset, features: Sequence[str] | None = None) -> dict[str, Any]:
     """types.ts ``DatasetSummary``; cached as JSON next to the parquet (per feature set)."""
-    feats = list(DEFAULT_SUMMARY_FEATURES) if not features else validate_features(features)
+    if features:
+        feats = validate_features(features)
+    else:
+        drop = set(excluded_variables(ds))
+        feats = [f for f in DEFAULT_SUMMARY_FEATURES if f not in drop]
     key = "default" if not features else hashlib.sha1(",".join(feats).encode()).hexdigest()[:12]
     cache = ds.directory / f"summary_{key}.json"
     cached = read_json(cache)
