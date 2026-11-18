@@ -15,9 +15,13 @@ import { PriorsGuardrails } from './PriorsGuardrails';
 
 const D = DEFAULT_FIT_CONFIG;
 
-export function FitForm({ datasetId, onCreated }: { datasetId: number | null; onCreated: (f: Fit) => void }) {
+export function FitForm({ datasetId, excluded = [], onCreated }: { datasetId: number | null; excluded?: string[]; onCreated: (f: Fit) => void }) {
   const [name, setName] = useState('');
-  const [dims, setDims] = useState<SegmentationDimension[]>(D.segmentation.dimensions);
+  const [dimsState, setDims] = useState<SegmentationDimension[]>(D.segmentation.dimensions);
+  // dimensions derived from a variable the dataset was built without are not offered
+  const available = SEGMENTATION_DIMENSIONS.filter((d) => !excluded.includes(d.source));
+  const unavailable = SEGMENTATION_DIMENSIONS.filter((d) => excluded.includes(d.source));
+  const dims = dimsState.filter((d) => available.some((a) => a.key === d));
   const [arms, setArms] = useState<ArmGridState>({
     amounts: D.arm_space.amounts.map((a) => a / 1000).join(', '),
     rates: D.arm_space.rates.map((r) => Math.round(r * 100)).join(', '),
@@ -57,7 +61,17 @@ export function FitForm({ datasetId, onCreated }: { datasetId: number | null; on
           include_null: arms.includeNull,
           ...pr.guardrails,
         },
-        hierarchy: { kappa_group: auto ? 'auto' : (kg ?? 20), kappa_leaf: auto ? 'auto' : (kl ?? 10), alpha0: a0 ?? 1, beta0: b0 ?? 1, ...pr.hierarchy },
+        hierarchy: {
+          kappa_group: auto ? 'auto' : (kg ?? 20),
+          kappa_leaf: auto ? 'auto' : (kl ?? 10),
+          alpha0: a0 ?? 1,
+          beta0: b0 ?? 1,
+          ...pr.hierarchy,
+          // the PTI policy effect needs annual_inc
+          ...(excluded.includes('annual_inc') && pr.hierarchy.policy_effect_cfg?.features
+            ? { policy_effect_cfg: { ...pr.hierarchy.policy_effect_cfg, features: pr.hierarchy.policy_effect_cfg.features.filter((f) => f !== 'pti') } }
+            : {}),
+        },
         recovery: { min_obs: minObs ?? 5, term_level: pr.term_level },
         mctm: { structure, prior_strength: prior ?? 1, chargeoff_lag_months: lag ?? 4 },
         reward: { funding_rate: (funding ?? 4) / 100, risk_aversion: lambda ?? 0, lendable_threshold: lendable ?? 0.6, prepayment_adjustment: pr.prepayment_adjustment },
@@ -80,7 +94,12 @@ export function FitForm({ datasetId, onCreated }: { datasetId: number | null; on
         </div>
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-ink-2">Segmentation dimensions (borrower group g)</span>
-          <Chips<SegmentationDimension> label="Segmentation dimensions" options={SEGMENTATION_DIMENSIONS.map((d) => ({ value: d.key, label: d.label, title: `derived from ${d.source}` }))} value={dims} onChange={setDims} />
+          <Chips<SegmentationDimension> label="Segmentation dimensions" options={available.map((d) => ({ value: d.key, label: d.label, title: `derived from ${d.source}` }))} value={dims} onChange={setDims} />
+          {unavailable.length > 0 && (
+            <p className="text-2xs text-muted">
+              Not available on this dataset (built without {[...new Set(unavailable.map((d) => d.source))].join(', ')}): {unavailable.map((d) => d.label).join(', ')}.
+            </p>
+          )}
           {errs.segmentation && <p className="text-2xs text-delta-bad">{errs.segmentation.join(' ')}</p>}
         </div>
         <ArmGridEditor value={arms} onChange={setArms} error={errs.arm_space} />

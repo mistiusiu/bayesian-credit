@@ -151,8 +151,8 @@ const DEFAULT_FEATURES = [
   'term',
 ];
 
-export function datasetSummary(datasetId: number, idx: LoanIndex, wanted: string[] | null): DatasetSummary {
-  const features = wanted?.length ? wanted : DEFAULT_FEATURES;
+export function datasetSummary(datasetId: number, idx: LoanIndex, wanted: string[] | null, excluded: string[] = []): DatasetSummary {
+  const features = wanted?.length ? wanted : DEFAULT_FEATURES.filter((f) => !excluded.includes(f));
   // 1-in-k systematic sample for quantiles and row-level bureau fields
   const step = Math.max(1, Math.floor(idx.n / 20000));
   const sample: number[] = [];
@@ -252,7 +252,7 @@ export function datasetSummary(datasetId: number, idx: LoanIndex, wanted: string
   };
 }
 
-export function variableRows(idx: LoanIndex, source: string): VariableRow[] {
+export function variableRows(idx: LoanIndex, source: string, excluded: string[] = []): VariableRow[] {
   const rng = new Rng(seedOf('vars', idx.seed, source));
   let empNull = 0;
   for (let i = 0; i < idx.n; i++) if (idx.emp[i] === 255) empNull++;
@@ -265,9 +265,10 @@ export function variableRows(idx: LoanIndex, source: string): VariableRow[] {
       stage: v.stage,
       primary_use: v.primary_use,
       kind: v.kind,
-      present: true,
-      dtype: v.dtype,
-      null_share: Math.round(nullShare * 10000) / 10000,
+      present: !excluded.includes(v.name),
+      dtype: excluded.includes(v.name) ? null : v.dtype,
+      null_share: excluded.includes(v.name) ? null : Math.round(nullShare * 10000) / 10000,
+      excluded: excluded.includes(v.name),
     };
   });
 }

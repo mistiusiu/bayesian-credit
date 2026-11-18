@@ -78,6 +78,9 @@ function createSimulation(raw: unknown, now: number) {
   e.check(bm === 'pause' || bm === 'auto_ack' || bm === 'off', 'breaker_mode', 'pause | auto_ack | off');
   const psiIn = isObj(b.psi) ? b.psi : {};
   const psi: PsiSettings = { ...DEFAULT_PSI, ...(psiIn as Partial<PsiSettings>), thresholds: { ...DEFAULT_PSI.thresholds, ...(isObj(psiIn.thresholds) ? psiIn.thresholds : {}) } };
+  const excluded = new Set(ds.params.exclude_variables ?? []);
+  if (Array.isArray(psiIn.features)) e.check(!psi.features.some((f) => excluded.has(f)), 'psi', `PSI features excluded from dataset #${ds.id}: ${psi.features.filter((f) => excluded.has(f)).join(', ')}.`);
+  else psi.features = psi.features.filter((f) => !excluded.has(f));
   e.check(psi.features.length > 0 && psi.features.every((f) => PSI_FEATURES.includes(f) || f === 'emp_length' || f === 'verification_status'), 'psi.features', 'Unknown PSI feature.');
   e.check(psi.thresholds.watch > 0 && psi.thresholds.watch < psi.thresholds.breaker, 'psi.thresholds', 'Need 0 < watch < breaker.');
   e.check(Number.isInteger(psi.window_months) && psi.window_months >= 1, 'psi.window_months', 'Must be an integer ≥ 1.');

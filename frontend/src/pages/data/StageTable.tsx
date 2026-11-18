@@ -17,12 +17,16 @@ export function StageTable({ datasetId }: { datasetId: number }) {
     <div className="space-y-4">
       <div className="grid gap-3 lg:grid-cols-5">
         {STAGES.map((s) => {
-          const n = q.data?.filter((v) => v.stage === s).length ?? 0;
+          const rows = q.data?.filter((v) => v.stage === s) ?? [];
+          const dropped = rows.filter((v) => v.excluded).length;
           return (
             <div key={s} className="rounded-lg border border-line bg-surface p-3">
               <div className="flex items-center justify-between">
                 <StageBadge stage={s} />
-                <span className="num text-sm font-semibold text-ink">{n}</span>
+                <span className="num text-sm font-semibold text-ink" title={dropped ? `${dropped} excluded by the dataset's variable selection` : undefined}>
+                  {rows.length - dropped}
+                  {dropped > 0 && <span className="text-xs font-normal text-muted"> / {rows.length}</span>}
+                </span>
               </div>
               <p className="mt-2 text-2xs leading-snug text-muted">{STAGE_BLURB[s]}</p>
             </div>
@@ -33,6 +37,19 @@ export function StageTable({ datasetId }: { datasetId: number }) {
         <Icon name="lock" size={14} className="mt-0.5 shrink-0 text-muted" />
         LeakageGuard: a BorrowerContext may only contain pre-decision columns; anything later raises LeakageError. Policy columns are the arm, interim columns feed the MCTM and interim rewards, terminal columns only update posteriors after the outcome.
       </p>
+      {!!q.data?.some((v) => v.excluded) && (
+        <p className="flex items-start gap-2 rounded-md border border-accent-strong/40 bg-accent-wash px-3 py-2 text-xs text-ink-2">
+          <Icon name="minus" size={14} className="mt-0.5 shrink-0 text-muted" />
+          <span>
+            Ablation dataset: built without{' '}
+            {q.data
+              .filter((v) => v.excluded)
+              .map((v) => v.name)
+              .join(', ')}
+            . Those columns are not stored, so no fit, simulation or shadow evaluation on this dataset can use them.
+          </span>
+        </p>
+      )}
       <Card
         title="Retained variables (Table 3)"
         subtitle="Stage, primary use, presence and missingness in this dataset"
@@ -54,7 +71,12 @@ export function StageTable({ datasetId }: { datasetId: number }) {
                   key: 'present',
                   header: 'Present',
                   align: 'center',
-                  render: (r) => (r.present ? <Icon name="check" size={13} aria-label="present" style={{ color: 'var(--status-good)' }} /> : <span className="text-muted">absent</span>),
+                  render: (r) =>
+                    r.present ? (
+                      <Icon name="check" size={13} aria-label="present" style={{ color: 'var(--status-good)' }} />
+                    ) : (
+                      <span className="text-muted">{r.excluded ? 'excluded' : 'absent'}</span>
+                    ),
                 },
                 { key: 'dtype', header: 'dtype', render: (r) => <code className="text-2xs text-muted">{r.dtype ?? '—'}</code> },
                 {

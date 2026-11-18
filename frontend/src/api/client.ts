@@ -44,6 +44,7 @@ import type {
   Simulation,
   SimulationCreate,
   Timeseries,
+  VariableOption,
   VariableRow,
 } from './types';
 
@@ -180,6 +181,7 @@ export const api = {
     get: (id: Id) => get<Dataset>(`/datasets/${id}/`),
     create: (body: DatasetCreate) => post<Dataset>('/datasets/', body),
     variables: (id: Id) => get<VariableRow[]>(`/datasets/${id}/variables/`),
+    catalogue: () => get<VariableOption[]>('/datasets/catalogue/'),
     summary: (id: Id, features?: string[]) => get<DatasetSummary>(`/datasets/${id}/summary/`, { features }),
     loans: (id: Id, q: LoanQuery, signal?: AbortSignal) => page<LoanRecord>(`/datasets/${id}/loans/`, { ...q }, signal),
   },
@@ -225,6 +227,7 @@ export const qk = {
   datasets: ['datasets'] as const,
   dataset: (id: Id) => ['datasets', id] as const,
   variables: (id: Id) => ['datasets', id, 'variables'] as const,
+  catalogue: ['catalogue'] as const,
   summary: (id: Id, features?: string[]) => ['datasets', id, 'summary', features ?? null] as const,
   loans: (id: Id, q: LoanQuery) => ['datasets', id, 'loans', q] as const,
   fits: (dataset?: Id | null) => ['fits', 'list', dataset ?? null] as const,
@@ -278,6 +281,8 @@ export const useDataset = (id: Id | null | undefined) =>
 
 export const useVariables = (id: Id | null | undefined, ready: boolean) =>
   useQuery({ queryKey: qk.variables(id as Id), queryFn: () => api.datasets.variables(id as Id), enabled: on(id) && ready });
+
+export const useVariableCatalogue = () => useQuery({ queryKey: qk.catalogue, queryFn: api.datasets.catalogue, staleTime: Infinity });
 
 export const useDatasetSummary = (id: Id | null | undefined, ready: boolean) =>
   useQuery({ queryKey: qk.summary(id as Id), queryFn: () => api.datasets.summary(id as Id), enabled: on(id) && ready });

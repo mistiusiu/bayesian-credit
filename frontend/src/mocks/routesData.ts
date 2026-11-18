@@ -20,6 +20,7 @@ import { portfolioResult } from './portfolio';
 import { completeContext, evaluateShadow, isPreDecisionKey } from './shadow';
 import { type DatasetRec, type FitRec, datasetIndex, db, fitMctm, fitModel, newJob } from './store';
 import { Errors, badRequest, body, conflict, epochOk, isObj, notFound, num, str } from './validate';
+import { SELECTABLE_VARIABLES, TABLE3, variableCatalogue } from './vocab';
 import type { Route } from './router';
 
 const list = (q: URLSearchParams, key: string) =>
@@ -70,6 +71,10 @@ function createDataset(raw: unknown, now: number) {
     if (isObj(b.shift.deltas)) for (const [k, v] of Object.entries(b.shift.deltas)) if (num(v) !== null) deltas[k] = v as number;
     shift = { at: at ?? '2016-06', deltas };
   }
+  const exclIn = Array.isArray(b.exclude_variables) ? b.exclude_variables.map(String) : [];
+  const bad = exclIn.filter((x) => !SELECTABLE_VARIABLES.has(x));
+  e.check(!bad.length, 'exclude_variables', `unknown or required variable(s), cannot be excluded: ${bad.join(', ')}`);
+  const exclude = TABLE3.map((v) => v.name).filter((x) => exclIn.includes(x));
   e.throwIfAny();
   const nominal = source === 'synthetic' ? n : Math.min(2_500_000, Math.round((maxRows ?? 2_260_701) * (frac ?? 1)));
   const id = db.next.dataset++;
@@ -84,6 +89,7 @@ function createDataset(raw: unknown, now: number) {
     issue_from: from,
     issue_to: to,
     shift,
+    exclude_variables: exclude,
   };
   const job = newJob('ingest', { type: 'dataset', id }, now + 500, 4200 + Math.min(4000, nominal / 100));
   const rec: DatasetRec = { id, name, params, nominalN: nominal, createdMs: now, jobId: job.id };
@@ -103,9 +109,14 @@ function createFit(raw: unknown, now: number) {
   e.throwIfAny();
   const ds = readyDataset(dsId!, now);
   const d = DEFAULT_FIT_CONFIG;
-  const seg = isObj(b.segmentation) && Array.isArray(b.segmentation.dimensions) ? (b.segmentation.dimensions as SegmentationDimension[]) : d.segmentation.dimensions;
+  const excluded = new Set(ds.params.exclude_variables ?? []);
+  const sourceOf = (k: SegmentationDimension) => SEGMENTATION_DIMENSIONS.find((x) => x.key === k)?.source ?? k;
+  const explicit = isObj(b.segmentation) && Array.isArray(b.segmentation.dimensions);
+  const seg = explicit ? (b.segmentation as { dimensions: SegmentationDimension[] }).dimensions : d.segmentation.dimensions.filter((k) => !excluded.has(sourceOf(k)));
   const valid = new Set(SEGMENTATION_DIMENSIONS.map((x) => x.key));
   e.check(seg.length > 0 && seg.every((x) => valid.has(x)) && new Set(seg).size === seg.length, 'segmentation', 'Choose one or more distinct supported dimensions.');
+  const gone = seg.filter((k) => excluded.has(sourceOf(k)));
+  e.check(!gone.length, 'segmentation', `${gone.join(', ')} derive(s) from variables excluded from dataset #${ds.id}.`);
   const arm = { ...d.arm_space, ...(isObj(b.arm_space) ? b.arm_space : {}) };
   e.check(Array.isArray(arm.amounts) && arm.amounts.length > 0 && arm.amounts.every((x) => num(x) !== null && x > 0), 'arm_space', 'amounts must be positive numbers.');
   e.check(Array.isArray(arm.rates) && arm.rates.length > 0 && arm.rates.every((x) => num(x) !== null && x > 0 && x < 1), 'arm_space', 'rates are fractions in (0, 1), e.g. 0.13.');
@@ -117,7 +128,12 @@ function createFit(raw: unknown, now: number) {
   const hierIn = isObj(b.hierarchy) ? b.hierarchy : {};
   e.check(!('policy_effect' in hierIn) || typeof hierIn.policy_effect === 'boolean', 'hierarchy.policy_effect', 'Must be true or false.');
   e.check(!('policy_effect_cfg' in hierIn) || isObj(hierIn.policy_effect_cfg), 'hierarchy.policy_effect_cfg', 'Must be an object (partial PolicyEffectConfig).');
-  const pe = { ...d.hierarchy.policy_effect_cfg, ...(isObj(hierIn.policy_effect_cfg) ? (hierIn.policy_effect_cfg as Partial<PolicyEffectConfig>) : {}) };
+  const peIn = isObj(hierIn.policy_effect_cfg) ? (hierIn.policy_effect_cfg as Partial<PolicyEffectConfig>) : {};
+  const pe = { ...d.hierarchy.policy_effect_cfg, ...peIn };
+  if (excluded.has('annual_inc')) {
+    if (peIn.features === undefined) pe.features = pe.features.filter((f) => f !== 'pti');
+    else e.check(!peIn.features.includes('pti'), 'hierarchy.policy_effect_cfg', `pti needs annual_inc, which is excluded from dataset #${ds.id}.`);
+  }
   const hier: HierarchyConfig = { ...d.hierarchy, ...(hierIn as Partial<HierarchyConfig>), policy_effect_cfg: pe };
   for (const k of ['kappa_group', 'kappa_leaf'] as const) e.check(hier[k] === 'auto' || (num(hier[k]) ?? 0) > 0, `hierarchy.${k}`, 'Must be > 0 or "auto".');
   e.check((num(hier.alpha0) ?? 0) > 0 && (num(hier.beta0) ?? 0) > 0, 'hierarchy', 'alpha0 and beta0 must be > 0.');
@@ -258,14 +274,15 @@ export const dataRoutes: Route[] = [
     (_m, q, _b, now) => paginate('/datasets/', [...db.datasets.values()].sort((a, b) => b.id - a.id).map((d) => renderDataset(d, now)), q),
   ],
   ['POST', /^\/datasets\/$/, (_m, _q, b, now) => createDataset(b, now), 201],
+  ['GET', /^\/datasets\/catalogue\/$/, () => variableCatalogue()],
   ['GET', /^\/datasets\/(\d+)\/$/, (m, _q, _b, now) => renderDataset(db.datasets.get(Number(m[1])) ?? notFound('dataset'), now)],
   ['GET', /^\/datasets\/(\d+)\/variables\/$/, (m, _q, _b, now) => {
     const ds = readyDataset(Number(m[1]), now);
-    return variableRows(datasetIndex(ds), ds.params.source);
+    return variableRows(datasetIndex(ds), ds.params.source, ds.params.exclude_variables ?? []);
   }],
   ['GET', /^\/datasets\/(\d+)\/summary\/$/, (m, q, _b, now) => {
     const ds = readyDataset(Number(m[1]), now);
-    return datasetSummary(ds.id, datasetIndex(ds), list(q, 'features') ?? null);
+    return datasetSummary(ds.id, datasetIndex(ds), list(q, 'features') ?? null, ds.params.exclude_variables ?? []);
   }],
   ['GET', /^\/datasets\/(\d+)\/loans\/$/, (m, q, _b, now) => {
     const ds = readyDataset(Number(m[1]), now);
