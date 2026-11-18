@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bayesian_credit.config import FrameworkConfig
+from bayesian_credit.config import POLICY_EFFECT_FEATURES, FrameworkConfig, SegmentationConfig
 from bayesian_credit.data.segmentation import DIMENSIONS
 from bayesian_credit.exceptions import ConfigurationError
 from drf_spectacular.utils import extend_schema_field
@@ -56,6 +56,42 @@ def _number(value, *, integer: bool = False) -> float | None:
     if integer and out != int(out):
         return None
     return out
+
+
+def apply_exclusions(attrs: dict, ds: Dataset, errors: dict[str, list[str]]) -> tuple[list[str] | None, dict]:
+    """Segmentation dimensions and hierarchy block consistent with the dataset's excluded
+    variables: explicit dimensions derived from an excluded column are rejected, the
+    default ones are dropped silently; without ``annual_inc`` the PTI policy-effect feature
+    is dropped (every row would be invalid and the effect would fall back to no tilt)."""
+    excluded = set((ds.params or {}).get("exclude_variables") or [])
+    dims = (attrs.get("segmentation") or {}).get("dimensions") or None
+    hierarchy = dict(attrs.get("hierarchy") or {})
+    if not excluded:
+        return dims, hierarchy
+    if dims:
+        gone = [d for d in dims if d in DIMENSIONS and DIMENSIONS[d][0] in excluded]
+        if gone:
+            errors.setdefault("segmentation", []).append(
+                f"{', '.join(gone)} derive(s) from variables excluded from dataset #{ds.pk} "
+                f"({', '.join(sorted({DIMENSIONS[d][0] for d in gone}))})."
+            )
+    else:
+        dims = [d for d in SegmentationConfig().dimensions if DIMENSIONS[d][0] not in excluded]
+        if not dims:
+            errors.setdefault("segmentation", []).append(
+                f"Every default dimension derives from a variable excluded from dataset #{ds.pk}; choose dimensions."
+            )
+    if "annual_inc" in excluded and isinstance(hierarchy.get("policy_effect_cfg", {}), dict):
+        pe = dict(hierarchy.get("policy_effect_cfg") or {})
+        features = pe.get("features")
+        if features is None:
+            pe["features"] = [f for f in POLICY_EFFECT_FEATURES if f != "pti"]
+            hierarchy["policy_effect_cfg"] = pe
+        elif "pti" in features:
+            errors.setdefault("hierarchy.policy_effect_cfg", []).append(
+                f"pti needs annual_inc, which is excluded from dataset #{ds.pk}."
+            )
+    return dims, hierarchy
 
 
 def validate_sections(attrs: dict) -> dict[str, list[str]]:
@@ -177,6 +213,7 @@ class FitCreateSerializer(serializers.Serializer):
         except Dataset.DoesNotExist:
             raise serializers.ValidationError({"dataset": [f"dataset {attrs['dataset']} does not exist"]}) from None
         errors = validate_sections(attrs)
+        dims, hierarchy = apply_exclusions(attrs, ds, errors) if not errors else (None, {})
         try:
             train_end = parse_epoch(attrs.get("train_end") or "2015-01", "train_end")
         except serializers.ValidationError as exc:
@@ -196,7 +233,7 @@ class FitCreateSerializer(serializers.Serializer):
         if "chargeoff_lag_months" in mctm:
             data["chargeoff_lag_months"] = mctm["chargeoff_lag_months"]
         raw = {
-            "hierarchy": attrs.get("hierarchy") or {},
+            "hierarchy": hierarchy,
             "recovery": rec,
             "mctm": mctm,
             "reward": attrs.get("reward") or {},
@@ -204,7 +241,6 @@ class FitCreateSerializer(serializers.Serializer):
             "data": data,
             "train_end": epoch_start(train_end),
         }
-        dims = (attrs.get("segmentation") or {}).get("dimensions")
         if dims:
             raw["segmentation"] = {"dimensions": list(dims)}
         try:
