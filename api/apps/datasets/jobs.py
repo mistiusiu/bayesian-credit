@@ -7,6 +7,7 @@ from typing import Any
 
 from bayesian_credit.config import ArmSpaceConfig, SegmentationConfig
 from bayesian_credit.data import ArmSpace, LendingClubLoader, Segmenter, load_loans, summarize
+from bayesian_credit.pipeline import apply_variable_selection
 from django.conf import settings
 
 from apps.common.jobs import ProgressReporter
@@ -53,14 +54,16 @@ def run_ingest(job: Job, reporter: ProgressReporter) -> None:
     kw = loader_kwargs(ds)
     reporter.log(f"loading {ds.source} loans ({', '.join(f'{k}={v}' for k, v in kw.items() if v is not None)})", 0.05)
     t0 = time.perf_counter()
-    df = load_loans(
-        ds.source,
-        with_outcomes=True,
-        arm_space=ArmSpace.from_config(ArmSpaceConfig()),
-        segmenter=Segmenter.from_config(SegmentationConfig()),
-        **kw,
-    )
-    reporter.log(f"loaded {len(df):,} loans and derived outcomes in {time.perf_counter() - t0:.1f}s", 0.6)
+    arm_space = ArmSpace.from_config(ArmSpaceConfig())
+    segmenter = Segmenter.from_config(SegmentationConfig())
+    df = load_loans(ds.source, with_outcomes=True, arm_space=arm_space, segmenter=segmenter, **kw)
+    reporter.log(f"loaded {len(df):,} loans and derived outcomes in {time.perf_counter() - t0:.1f}s", 0.55)
+    exclude = (ds.params or {}).get("exclude_variables") or []
+    if exclude:
+        meta_attrs = dict(df.attrs)
+        df = apply_variable_selection(df, exclude, arm_space=arm_space, segmenter=segmenter)
+        df.attrs = meta_attrs
+        reporter.log(f"excluded {len(exclude)} variable(s): {', '.join(exclude)}", 0.6)
     meta = dict(df.attrs.get("synthetic") or {})
     df = df.sort_values("loan_id", kind="mergesort").reset_index(drop=True)
     df.attrs = {}
