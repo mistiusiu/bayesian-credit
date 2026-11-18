@@ -12,6 +12,7 @@ from bayesian_credit.data import DEFAULT_SHIFT
 from bayesian_credit.data.segmentation import Segmenter
 from bayesian_credit.pipeline import (
     FittedModels,
+    apply_variable_selection,
     elapsed_term_mask,
     ensure_outcomes,
     evaluate_predictive,
@@ -19,6 +20,7 @@ from bayesian_credit.pipeline import (
     load_dataset,
     prepare_dataset,
     run_shadow_portfolio,
+    run_simulation,
 )
 from bayesian_credit.simulation import cli
 from bayesian_credit.simulation.store import RunDirectory
@@ -109,6 +111,35 @@ def test_elapsed_term_filter_and_predictive_subsets():
     assert 0.0 <= res["default"]["primary"]["auc"] <= 1.0
     assert res["credit_state"]["all"]["n_transitions"] > res["credit_state"]["elapsed"]["n_transitions"]
     json.dumps(res, allow_nan=False)
+
+
+NO_FICO_OR_GRADE = ("fico_range_low", "fico_range_high", "last_fico_range_low", "last_fico_range_high", "grade", "sub_grade")
+
+
+def test_variable_selection_drops_columns_and_their_trace_in_the_group_key():
+    cfg, df, _ = _data()
+    out = apply_variable_selection(df, NO_FICO_OR_GRADE, cfg)
+    assert not set(NO_FICO_OR_GRADE) & set(out.columns)
+    # grade was the first segmentation dimension: it no longer splits the stored groups
+    assert out["y_group"].astype(str).str.startswith("unknown|").all()
+    for col in ("y_default", "y_resolved", "y_realized_revenue", "y_historical_arm"):
+        pd.testing.assert_series_equal(out[col], df[col].reset_index(drop=True), check_names=False)
+    assert apply_variable_selection(df, (), cfg) is df
+    with pytest.raises(ValueError, match="cannot be excluded: loan_status"):
+        apply_variable_selection(df, ("loan_status",), cfg)
+
+
+def test_prepare_dataset_records_the_exclusion_and_an_ablated_dataset_fits_and_simulates(tmp_path):
+    cfg = FrameworkConfig(segmentation=SegmentationConfig(dimensions=("purpose_group", "home_ownership", "dti_band")))
+    df, summary = prepare_dataset("synthetic", None, cfg=cfg, n=4000, seed=5, exclude_variables=list(NO_FICO_OR_GRADE))
+    assert summary["exclude_variables"] == list(NO_FICO_OR_GRADE) and not set(NO_FICO_OR_GRADE) & set(df.columns)
+    fitted = fit_models(df, cfg, "2016-01-01", evaluate=False)
+    assert fitted.two_stage.default_model.groups and not any("unknown" in g for g in fitted.two_stage.default_model.groups)
+    sim = SimulationConfig(start="2016-01-01", end="2016-02-29", max_loans=None, policies=("thompson", "historical"),
+                           interim_months=1, checkpoint_every=1)
+    # fico_range_low and grade are default PSI features; the remaining ones are monitored
+    result = run_simulation(df, fitted, sim, tmp_path / "run", cfg=cfg)
+    assert result.status == "completed" and result.n_decisions > 0
 
 
 def test_shadow_portfolio_scores_holdout_loans_only():

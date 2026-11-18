@@ -109,6 +109,49 @@ INTERIM_COLUMNS = columns_for(Stage.INTERIM)
 TERMINAL_COLUMNS = columns_for(Stage.TERMINAL)
 ALL_RETAINED_COLUMNS = tuple(v.name for v in RETAINED_VARIABLES)
 
+#: **[decision]** Columns every dataset keeps whatever variable selection is asked for: the
+#: arm (policy), the time index and realised exposure (disbursement), the outcome labels
+#: (terminal), ``last_pymnt_d`` (``y_months_on_book`` / ``y_resolution_date`` and the
+#: MCTM panel are derived from it) and ``installment`` (a function of the policy arm, not
+#: borrower information; the policy-effect PTI feature needs it).
+REQUIRED_COLUMNS: tuple[str, ...] = (
+    *POLICY_COLUMNS,
+    *DISBURSEMENT_COLUMNS,
+    "installment",
+    "last_pymnt_d",
+    *TERMINAL_COLUMNS,
+)
+#: Columns a variable selection may drop: the pre-decision and interim ones minus the above.
+SELECTABLE_COLUMNS: tuple[str, ...] = tuple(c for c in ALL_RETAINED_COLUMNS if c not in REQUIRED_COLUMNS)
+
+
+def validate_exclusion(columns: Iterable[str]) -> tuple[str, ...]:
+    """The excluded columns de-duplicated in Table 3 order; raises ``ValueError`` for an
+    unknown or required column."""
+    wanted = list(dict.fromkeys(str(c) for c in columns))
+    unknown = [c for c in wanted if c not in VARIABLES_BY_NAME]
+    required = [c for c in wanted if c in REQUIRED_COLUMNS]
+    problems = []
+    if unknown:
+        problems.append(f"unknown variable(s): {', '.join(unknown)}")
+    if required:
+        problems.append(f"required by the pipeline, cannot be excluded: {', '.join(required)}")
+    if problems:
+        raise ValueError("; ".join(problems))
+    keep = set(wanted)
+    return tuple(c for c in SELECTABLE_COLUMNS if c in keep)
+
+
+def drop_variables(df: pd.DataFrame, exclude: Iterable[str]) -> pd.DataFrame:
+    """``df`` without the excluded Table 3 columns (validated by :func:`validate_exclusion`).
+
+    Derived columns that encode an excluded variable (``y_group``) must be recomputed by
+    the caller; :func:`bayesian_credit.pipeline.apply_variable_selection` does both.
+    """
+    cols = [c for c in validate_exclusion(exclude) if c in df.columns]
+    return df.drop(columns=cols) if cols else df
+
+
 CATEGORICAL_COLUMNS = tuple(v.name for v in RETAINED_VARIABLES if v.kind == "categorical")
 DATE_COLUMNS = tuple(v.name for v in RETAINED_VARIABLES if v.kind == "date")
 NUMERIC_COLUMNS = tuple(v.name for v in RETAINED_VARIABLES if v.kind == "numeric")

@@ -40,7 +40,7 @@ from .data.loader import STRING_DTYPE
 from .data.outcomes import add_months, derive_outcomes, historical_arms
 from .data.panel import LoanStatePanel
 from .data.reference_rates import ReferenceRates
-from .data.schema import OUTCOME_COLUMNS
+from .data.schema import OUTCOME_COLUMNS, drop_variables
 from .data.segmentation import Segmenter
 from .evaluation import predictive as pm
 from .exceptions import DataSourceError
@@ -53,6 +53,7 @@ from .simulation.events import jsonable
 
 __all__ = [
     "FittedModels",
+    "apply_variable_selection",
     "build_report",
     "elapsed_term_mask",
     "ensure_outcomes",
@@ -115,6 +116,26 @@ def ensure_outcomes(
     return out.assign(y_group=groups.astype(STRING_DTYPE).to_numpy(), y_historical_arm=arms)
 
 
+def apply_variable_selection(
+    df: pd.DataFrame,
+    exclude: Any,
+    cfg: FrameworkConfig | None = None,
+    *,
+    arm_space: ArmSpace | None = None,
+    segmenter: Segmenter | None = None,
+) -> pd.DataFrame:
+    """Drop the excluded Table 3 columns (ablations such as "no FICO") and recompute the
+    derived ``y_group`` / ``y_historical_arm`` so no stored column still encodes them: a
+    segmentation dimension whose source column is gone becomes the constant ``"unknown"``.
+    Outcome labels (``y_default`` ...) come from required columns and are kept.
+    """
+    excluded = [c for c in exclude or () if c in df.columns]
+    out = drop_variables(df, exclude or ())
+    if not excluded:
+        return out
+    return ensure_outcomes(out, cfg, arm_space=arm_space, segmenter=segmenter)
+
+
 def load_dataset(path: str | os.PathLike[str]) -> pd.DataFrame:
     """Read a LoanTable parquet written by :func:`prepare_dataset` (dtypes restored)."""
     return LendingClubLoader.from_parquet(path)
@@ -125,9 +146,13 @@ def prepare_dataset(
     out_parquet: str | os.PathLike[str] | None = None,
     *,
     cfg: FrameworkConfig | None = None,
+    exclude_variables: Any = (),
     **kwargs: Any,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Ingest a LoanTable with outcomes and (optionally) write it to parquet.
+
+    ``exclude_variables`` drops selectable Table 3 columns after the outcomes are derived
+    (:func:`apply_variable_selection`), e.g. the FICO columns for a thin-file ablation.
 
     ``source`` is ``"synthetic"`` or ``"lending_club"``; ``kwargs`` go to
     :func:`bayesian_credit.data.load_loans` (``n``, ``seed``, ``shift_at``, ``shift`` /
@@ -149,11 +174,13 @@ def prepare_dataset(
         data_cfg=cfg.data,
         **kw,
     )
+    df = apply_variable_selection(df, exclude_variables, cfg)
     summary = summarize(df, cfg.data)
     summary.update(
         {
             "source": source,
             "params": jsonable(kw),
+            "exclude_variables": list(exclude_variables or ()),
             "n_columns": int(df.shape[1]),
             "load_seconds": round(time.perf_counter() - t0, 3),
             "path": None,
