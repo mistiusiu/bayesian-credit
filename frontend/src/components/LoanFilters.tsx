@@ -10,7 +10,7 @@ export function LoanFilters({ value, onChange }: { value: LoanFilterState; onCha
     <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
       <div className="flex flex-col gap-1">
         <span className="text-2xs font-medium text-muted">Grade</span>
-        <Chips size="sm" label="Grade" options={GRADES.map((g) => ({ value: g, label: g }))} value={value.grade} onChange={(grade) => onChange({ ...value, grade })} />
+        <Chips label="Grade" options={GRADES.map((g) => ({ value: g, label: g }))} value={value.grade} onChange={(grade) => onChange({ ...value, grade })} />
       </div>
       <label className="flex flex-col gap-1 text-2xs font-medium text-muted">
         Purpose

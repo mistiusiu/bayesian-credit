@@ -33,22 +33,27 @@ export function PortfolioPanel({ fit }: { fit: Fit }) {
     <div className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <Card title="Evaluate a portfolio" subtitle="Shadow vs historical on a sample of holdout borrowers (background job)">
-          <form onSubmit={submit} className="space-y-3" noValidate>
-            <div className="grid grid-cols-2 gap-3">
+          <form onSubmit={submit} className="space-y-5" noValidate>
+            <div className="grid grid-cols-2 gap-4">
               <Field label="Borrowers" hint="100 – 50,000" error={errs.max_loans}>
                 {(id, d, inv) => <NumberInput id={id} aria-describedby={d} aria-invalid={inv} min={100} step={500} value={maxLoans} onValue={setMaxLoans} />}
               </Field>
-              <Field label="Seed">{(id) => <NumberInput id={id} value={seed} onValue={setSeed} />}</Field>
+              <Field label="Seed" hint="same seed, same sample">
+                {(id, d) => <NumberInput id={id} aria-describedby={d} value={seed} onValue={setSeed} />}
+              </Field>
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-ink-2">Grades (empty = all)</span>
-              <Chips size="sm" label="Grades" options={GRADES.map((g) => ({ value: g, label: g }))} value={grades} onChange={setGrades} />
+              <span className="text-xs font-medium text-ink-2">Grades</span>
+              <Chips label="Grades" options={GRADES.map((g) => ({ value: g, label: g }))} value={grades} onChange={setGrades} />
+              <p className="text-2xs text-muted">{grades.length ? `${grades.length} of ${GRADES.length} grades` : 'none selected = every grade'}</p>
             </div>
             <Toggle checked={resolvedOnly} onChange={setResolvedOnly} label="Resolved loans only" description="so realized historical profit is defined for every loan" />
             <FormError message={create.error && !Object.keys(errs).length ? create.error.message : null} />
-            <Button type="submit" variant="primary" icon="play" loading={create.isPending}>
-              Run portfolio evaluation
-            </Button>
+            <div className="border-t border-line pt-4">
+              <Button type="submit" variant="primary" icon="play" loading={create.isPending}>
+                Run portfolio evaluation
+              </Button>
+            </div>
           </form>
         </Card>
         <Card title="Runs" bodyClassName="p-0">
