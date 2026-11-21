@@ -334,7 +334,7 @@ function seed(): void {
     params: {
       name: 'Lending Club 2012–2018 · 200k sample',
       source: 'lending_club',
-      path: 'data/raw/accepted_2007_to_2018Q4.csv.gz',
+      path: 'data/raw/Loan_status_2007-2020Q3.csv',
       n: null,
       seed: 7,
       max_rows: 200000,
