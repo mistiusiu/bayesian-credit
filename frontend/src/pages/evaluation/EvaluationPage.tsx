@@ -61,6 +61,7 @@ export function EvaluationPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Governance · Table 11"
         title="Evaluation"
         description="Table 11 of the proposal: predictive performance, decision-making performance, adaptability and computational feasibility, with the historical policy (or the base rate) as the reference."
       />

@@ -26,7 +26,7 @@ export function Segmented<T extends string | number>({
     refs.current[next]?.focus();
   };
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-md border border-line-strong bg-surface-2 p-0.5" onKeyDown={onKey}>
+    <div role="radiogroup" aria-label={label} className="inline-flex divide-x divide-line rounded border border-line-strong bg-surface" onKeyDown={onKey}>
       {options.map((o, i) => {
         const active = o.value === value;
         return (
@@ -42,9 +42,9 @@ export function Segmented<T extends string | number>({
             tabIndex={active || (idx < 0 && i === 0) ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
-              'rounded-[5px] font-medium whitespace-nowrap transition-colors',
+              'font-medium whitespace-nowrap transition-colors first:rounded-l-[2px] last:rounded-r-[2px]',
               size === 'sm' ? 'h-6 px-2 text-2xs' : 'h-7 px-2.5 text-xs',
-              active ? 'bg-surface text-ink shadow-sm ring-1 ring-line' : 'text-muted hover:text-ink',
+              active ? 'bg-surface-2 font-semibold text-ink shadow-[inset_0_-2px_0_var(--brand)]' : 'text-muted hover:bg-surface-2 hover:text-ink',
             )}
           >
             {o.label}

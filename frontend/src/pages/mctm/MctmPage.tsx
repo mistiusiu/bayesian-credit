@@ -91,6 +91,7 @@ export function MctmPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Pipeline · Credit states"
         title="MCTM"
         description="Markov chain over credit states S = {Current, Delinquent, Recovered, Absorbed Loss}; R and L are absorbing. Interim behaviour enters the reward before terminal outcomes are known."
       />

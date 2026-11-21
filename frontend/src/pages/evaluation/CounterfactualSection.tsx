@@ -64,7 +64,7 @@ export function CounterfactualSection({ report }: { report: EvaluationReport }) 
   const nLending = fit?.n_arms != null ? fit.n_arms - (fit.config.arm_space.include_null ? 1 : 0) : null;
   return (
     <section aria-label="Counterfactual evaluation detail" className="space-y-3">
-      <SectionTitle>Counterfactual evaluation · shadow engine detail</SectionTitle>
+      <SectionTitle>Counterfactual evaluation · Shadow Lending Engine detail</SectionTitle>
       {b ? (
         <>
           <p className="text-xs text-muted">{b.origin}</p>
@@ -91,7 +91,7 @@ export function CounterfactualSection({ report }: { report: EvaluationReport }) 
         </p>
       ) : (
         <p className="rounded-lg border border-line bg-surface px-4 py-3 text-xs text-muted">
-          The report has no shadow portfolio summary ({cf?.note ?? 'block absent'}) and fit #{report.fit} has no finished portfolio evaluation: run one on the Shadow engine page (Portfolio tab).
+          The report has no shadow portfolio summary ({cf?.note ?? 'block absent'}) and fit #{report.fit} has no finished portfolio evaluation: run one on the Shadow Lending Engine page (Portfolio tab).
         </p>
       )}
       {report.fit !== null && (

@@ -27,7 +27,7 @@ export function Chips<T extends string>({
             title={o.title}
             onClick={() => toggle(o.value)}
             className={cn(
-              'rounded-full border font-medium whitespace-nowrap transition-colors',
+              'rounded border font-medium whitespace-nowrap transition-colors',
               size === 'sm' ? 'h-6 px-2 text-2xs' : 'h-7 px-2.5 text-xs',
               on ? 'border-accent-strong bg-accent-wash text-ink' : 'border-line-strong text-muted hover:text-ink',
             )}

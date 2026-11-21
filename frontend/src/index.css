@@ -10,22 +10,30 @@
  */
 :root {
   color-scheme: light;
-  --plane: #f9f9f7;
-  --surface-1: #fcfcfb;
-  --surface-2: #f3f2ee;
-  --surface-3: #e9e8e2;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #6f6d68;
-  --text-axis: #898781;
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
-  --border-strong: rgba(11, 11, 11, 0.22);
-  --accent: #256abf;
-  --accent-strong: #1c5cab;
-  --accent-wash: rgba(42, 120, 214, 0.1);
-  --focus: #2a78d6;
+  /* Surfaces: white cards on a cool light-gray plane, hairline borders (flat, no tint). */
+  --plane: #f2f2f2;
+  --surface-1: #ffffff;
+  --surface-2: #f5f5f5;
+  --surface-3: #e0e0e0;
+  --text-primary: #151515;
+  --text-secondary: #4d4d4d;
+  --text-muted: #6a6a6a;
+  --text-axis: #8a8a8a;
+  --grid: #e5e5e5;
+  --axis: #c7c7c7;
+  --border: rgba(21, 21, 21, 0.13);
+  --border-strong: rgba(21, 21, 21, 0.3);
+  /* Interactive blue: links, selection, focus, info. */
+  --accent: #0066cc;
+  --accent-strong: #0066cc;
+  --accent-wash: rgba(0, 102, 204, 0.09);
+  --focus: #0066cc;
+  /* Brand red: the mark, primary CTAs and active indicators only (never state). */
+  --brand: #ee0000;
+  --brand-strong: #a60000;
+  --brand-wash: rgba(238, 0, 0, 0.07);
+  /* Masthead + side nav: always near-black (rendered in the dark token scope). */
+  --chrome: #151515;
   --delta-good: #006300;
   --delta-bad: #b42727;
 
@@ -43,34 +51,43 @@
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
 
-  --div-mid: #f0efec;
-  --hatch: rgba(11, 11, 11, 0.13);
+  --div-mid: #f0f0f0;
+  --hatch: rgba(21, 21, 21, 0.13);
   --band-watch: rgba(250, 178, 25, 0.12);
   --band-breaker: rgba(208, 59, 59, 0.1);
   --band-open: rgba(208, 59, 59, 0.1);
   --band-half: rgba(250, 178, 25, 0.1);
   --tooltip-bg: #ffffff;
-  --shadow: 0 1px 2px rgba(11, 11, 11, 0.06), 0 8px 24px rgba(11, 11, 11, 0.08);
+  --shadow: 0 1px 2px rgba(21, 21, 21, 0.08), 0 4px 16px rgba(21, 21, 21, 0.1);
 }
 
-:root[data-theme="dark"] {
+/*
+ * Dark scope. Also applies to any element carrying data-theme="dark" (the masthead and
+ * side nav stay near-black in the light theme), so tokens re-resolve inside that subtree.
+ */
+:root[data-theme="dark"],
+[data-theme="dark"] {
   color-scheme: dark;
-  --plane: #0d0d0d;
-  --surface-1: #1a1a19;
-  --surface-2: #232322;
-  --surface-3: #2e2e2c;
-  --text-primary: #f0efec;
-  --text-secondary: #c3c2b7;
-  --text-muted: #a3a29b;
-  --text-axis: #898781;
-  --grid: #2c2c2a;
-  --axis: #383835;
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.2);
-  --accent: #256abf;
-  --accent-strong: #3987e5;
-  --accent-wash: rgba(57, 135, 229, 0.14);
-  --focus: #5598e7;
+  --plane: #151515;
+  --surface-1: #1f1f1f;
+  --surface-2: #292929;
+  --surface-3: #383838;
+  --text-primary: #f2f2f2;
+  --text-secondary: #c7c7c7;
+  --text-muted: #a3a3a3;
+  --text-axis: #8a8a8a;
+  --grid: #2e2e2e;
+  --axis: #3d3d3d;
+  --border: rgba(255, 255, 255, 0.11);
+  --border-strong: rgba(255, 255, 255, 0.24);
+  --accent: #0066cc;
+  --accent-strong: #4394e5;
+  --accent-wash: rgba(67, 148, 229, 0.15);
+  --focus: #4394e5;
+  --brand: #ee0000;
+  --brand-strong: #a60000;
+  --brand-wash: rgba(238, 0, 0, 0.14);
+  --chrome: #0b0b0b;
   --delta-good: #0ca30c;
   --delta-bad: #e66767;
 
@@ -83,14 +100,19 @@
   --series-7: #9085e9;
   --series-8: #e66767;
 
-  --div-mid: #383835;
+  --div-mid: #383838;
   --hatch: rgba(255, 255, 255, 0.12);
   --band-watch: rgba(250, 178, 25, 0.1);
   --band-breaker: rgba(208, 59, 59, 0.14);
   --band-open: rgba(208, 59, 59, 0.16);
   --band-half: rgba(250, 178, 25, 0.1);
-  --tooltip-bg: #232322;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --tooltip-bg: #292929;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* `color` inherits as a computed value, so a nested dark scope has to restate it. */
+[data-theme="dark"] {
+  color: var(--text-primary);
 }
 
 @theme inline {
@@ -108,6 +130,10 @@
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-wash: var(--accent-wash);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-wash: var(--brand-wash);
+  --color-chrome: var(--chrome);
   --color-good: var(--status-good);
   --color-warning: var(--status-warning);
   --color-serious: var(--status-serious);
@@ -125,8 +151,17 @@
 }
 
 @theme {
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Red Hat type family (SIL OFL, self-hosted via @fontsource): Text for UI, Display for headlines. */
+  --font-sans: "Red Hat Text", "RedHatText", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Red Hat Display", "RedHatDisplay", "Red Hat Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Red Hat Mono", "RedHatMono", ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Square-ish corners: everything steps down to 2–4px; pills (rounded-full) are kept for dots. */
+  --radius: 3px;
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
   --shadow-pop: var(--shadow);
@@ -154,7 +189,7 @@
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
-    border-radius: 3px;
+    border-radius: 2px;
   }
   ::selection {
     background: var(--accent-wash);
@@ -174,6 +209,11 @@
   pre {
     font-family: var(--font-mono);
   }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+  }
 }
 
 @layer components {
@@ -185,7 +225,7 @@
     height: 2rem;
     padding: 0 0.6rem;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: 3px;
     background: var(--surface-1);
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;
@@ -203,6 +243,34 @@
   select.field-input {
     padding-right: 1.6rem;
   }
+  /* Eyebrow / kicker: small uppercase semibold label above a heading. */
+  .eyebrow {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  /* Text CTA: blue, semibold, trailing arrow that nudges on hover; dashed underline on hover. */
+  .cta-link {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35em;
+    font-weight: 600;
+    color: var(--accent-strong);
+    text-underline-offset: 4px;
+  }
+  .cta-link::after {
+    content: "\2192";
+    transition: transform 150ms ease;
+  }
+  .cta-link:hover {
+    text-decoration: underline dashed 1px;
+  }
+  .cta-link:hover::after {
+    transform: translateX(3px);
+  }
   /* Not-admissible marker: a sparse, low-contrast 45° hatch on the empty surface (state, not a value). */
   .hatch-na {
     background-color: var(--surface-2);
@@ -214,7 +282,7 @@
   }
   .cell-scroll::-webkit-scrollbar-thumb {
     background: var(--surface-3);
-    border-radius: 4px;
+    border-radius: 2px;
   }
 }
 

@@ -26,9 +26,9 @@ export function StatTile({
   className?: string;
 }) {
   return (
-    <div className={cn('min-w-0 rounded-lg border border-line bg-surface px-3.5 py-3', className)}>
+    <div className={cn('min-w-0 rounded border border-line bg-surface px-4 py-3.5', className)}>
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs text-muted">{label}</span>
+        <span className="truncate text-xs font-medium text-muted">{label}</span>
         {status && (
           <span className="inline-flex items-center gap-1 text-2xs font-medium text-ink-2">
             <StatusGlyph tone={status.tone} />
@@ -36,7 +36,7 @@ export function StatTile({
           </span>
         )}
       </div>
-      <div className="mt-1 truncate text-[22px] leading-7 font-semibold text-ink">{value}</div>
+      <div className="mt-1.5 truncate font-display text-[26px] leading-8 font-bold tracking-tight text-ink">{value}</div>
       {(delta || hint) && (
         <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs">
           {delta && (

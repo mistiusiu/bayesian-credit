@@ -46,7 +46,7 @@ export function UpliftDecomposition({ d, className }: { d: Decomposition; classN
     <ChartFrame
       className={className}
       title="Where the uplift comes from"
-      caption={`Expected profit when the shadow engine may change only the rate (historical amount and term kept), then rate and amount (term kept), then everything; each step takes the best admissible arm. Total uplift ${fmt.usdCompactSigned(total)} (${fmt.pctSigned(upliftFraction(total, hist), 0)} of historical).`}
+      caption={`Expected profit when the Shadow Lending Engine may change only the rate (historical amount and term kept), then rate and amount (term kept), then everything; each step takes the best admissible arm. Total uplift ${fmt.usdCompactSigned(total)} (${fmt.pctSigned(upliftFraction(total, hist), 0)} of historical).`}
       legend={
         <Legend
           items={[

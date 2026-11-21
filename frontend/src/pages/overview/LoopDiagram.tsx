@@ -53,7 +53,7 @@ function Node({ info, x, y, w = NW, h = NH, dashed = false }: { info: StageInfo;
         y={y - h / 2}
         width={w}
         height={h}
-        rx={9}
+        rx={3}
         fill="var(--surface-1)"
         stroke={dashed ? 'var(--text-axis)' : 'var(--border-strong)'}
         strokeDasharray={dashed ? '4 3' : undefined}
@@ -114,8 +114,8 @@ export function LoopDiagram({
         aria-label={`PSI Sentinel: ${sentinel.label}`}
         className="group outline-none"
       >
-        <rect x={14} y={14} width={950} height={H - 28} rx={18} fill="none" stroke="var(--border-strong)" strokeWidth={1.5} className="group-focus-visible:stroke-[var(--focus)]" />
-        <rect x={34} y={4} width={344} height={22} rx={11} fill="var(--surface-1)" stroke="var(--border-strong)" />
+        <rect x={14} y={14} width={950} height={H - 28} rx={4} fill="none" stroke="var(--border-strong)" strokeWidth={1.5} className="group-focus-visible:stroke-[var(--focus)]" />
+        <rect x={34} y={4} width={344} height={22} rx={3} fill="var(--surface-1)" stroke="var(--border-strong)" />
         <circle cx={50} cy={15} r={4.5} fill={TONE_COLOR[sentinel.tone]} />
         <text x={62} y={19} fontSize={12} fontWeight={600} fill="var(--text-primary)">
           PSI Sentinel
@@ -128,7 +128,7 @@ export function LoopDiagram({
         <line key={e.i} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} stroke="var(--text-axis)" strokeWidth={1.5} markerEnd="url(#arrow)" />
       ))}
       <g aria-hidden="true">
-        <rect x={bx - 28} y={by - 11} width={56} height={22} rx={5} fill="var(--surface-1)" stroke={sentinel.breakerOpen ? TONE_COLOR.critical : 'var(--border-strong)'} />
+        <rect x={bx - 28} y={by - 11} width={56} height={22} rx={3} fill="var(--surface-1)" stroke={sentinel.breakerOpen ? TONE_COLOR.critical : 'var(--border-strong)'} />
         <text x={bx} y={by + 4} textAnchor="middle" fontSize={10.5} fill={sentinel.breakerOpen ? 'var(--text-primary)' : 'var(--text-muted)'}>
           {sentinel.breakerOpen ? 'frozen' : 'breaker'}
         </text>

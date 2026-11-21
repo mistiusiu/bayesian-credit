@@ -27,6 +27,7 @@ export function RiskPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Pipeline · Hierarchical risk"
         title="Risk models"
         description="Two-Stage Beta-Beta: hierarchical Beta-Bernoulli default (global → group → leaf, κ shrinkage) and Beta method-of-moments recovery given default; validated on a temporal holdout."
       />

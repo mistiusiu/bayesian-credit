@@ -10,7 +10,7 @@ export function HowToReadUplift({ className }: { className?: string }) {
       </h3>
       <ul className="list-disc space-y-1 pl-4 leading-relaxed">
         <li>
-          <strong className="font-medium text-ink">A model quantity, not an observed result.</strong> Uplift is the fitted risk model&apos;s expected profit of the arms the shadow engine would offer minus that of the arms Lending Club issued,
+          <strong className="font-medium text-ink">A model quantity, not an observed result.</strong> Uplift is the fitted risk model&apos;s expected profit of the arms the Shadow Lending Engine would offer minus that of the arms Lending Club issued,
           for the same borrowers. Borrowers are assumed to accept any admissible offer: there is no take-up or adverse-selection term beyond the policy-effect prior (higher rates, longer terms and heavier payments raise the
           predicted default rate).
         </li>
