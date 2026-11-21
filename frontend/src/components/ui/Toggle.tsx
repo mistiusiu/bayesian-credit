@@ -14,7 +14,8 @@ export function Toggle({
   disabled?: boolean;
 }) {
   return (
-    <label className={cn('inline-flex items-start gap-2.5 select-none', disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer')}>
+    // block-level: a toggle owns its row, so a following button never wraps beside it
+    <label className={cn('flex w-fit items-start gap-2.5 select-none', disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer')}>
       <button
         type="button"
         role="switch"
