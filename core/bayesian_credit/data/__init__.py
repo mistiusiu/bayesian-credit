@@ -9,6 +9,7 @@ Lending Club loader, synthetic generator, outcome derivation and the MCTM state 
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pandas as pd
@@ -20,6 +21,8 @@ from .loader import (
     CANONICAL_COLUMNS,
     DEFAULT_FILENAME,
     KAGGLE_DATASET,
+    KNOWN_SOURCES,
+    LEGACY_FILENAME,
     STRING_DTYPE,
     LendingClubLoader,
     canonicalize,
@@ -70,7 +73,10 @@ from .synthetic import generate as generate_synthetic
 
 SOURCES = ("synthetic", "lending_club")
 _SYNTHETIC_KEYS = {"n", "seed", "start", "end", "snapshot", "shift_at", "shift"}
-_LC_KEYS = {"path", "cache", "cache_dir", "max_rows", "sample_fraction", "seed", "issue_from", "issue_to", "columns", "order"}
+_LC_KEYS = {
+    "path", "cache", "cache_dir", "max_rows", "sample_fraction", "seed", "issue_from", "issue_to", "columns", "order",
+    "snapshot",
+}
 
 
 def load_loans(
@@ -89,8 +95,12 @@ def load_loans(
     ``shift``; ``issue_from`` / ``issue_to`` / ``sample_fraction`` filter the result.
     lending_club: ``path``, ``cache``, ``cache_dir``, ``max_rows``, ``sample_fraction``,
     ``seed``, ``issue_from``, ``issue_to``, ``columns``, ``order`` (see
-    :meth:`LendingClubLoader.load`). Keyword arguments set to ``None`` are ignored, so
-    callers can pass one parameter dict for both sources.
+    :meth:`LendingClubLoader.load`) and ``snapshot`` (default: the file's own
+    :attr:`LendingClubLoader.snapshot_date`, so outcomes of the 2020Q3 export are censored at
+    2020-10 and those of the 2018Q4 export at 2019-03). Keyword arguments set to ``None``
+    are ignored, so callers can pass one parameter dict for both sources.
+
+    The snapshot the outcomes were derived with is ``df.attrs["snapshot_date"]``.
     """
     cfg = data_cfg or DataConfig()
     kw = {k: v for k, v in kwargs.items() if v is not None}
@@ -113,18 +123,24 @@ def load_loans(
         if fraction is not None:
             df = subsample(df, float(fraction), seed=gen.seed)
         df.attrs["synthetic"] = dict(gen.last_meta)
+        snapshot = str(cfg.snapshot_date)  # what derive_outcomes censors at
     elif src in ("lending_club", "lc", "kaggle"):
         unknown = set(kw) - _LC_KEYS
         if unknown:
             raise DataSourceError(f"unsupported arguments for source='lending_club': {sorted(unknown)}")
+        snapshot = kw.pop("snapshot", None)
         loader = LendingClubLoader(
             kw.pop("path", None), cfg, cache=kw.pop("cache", True), cache_dir=kw.pop("cache_dir", None)
         )
         df = loader.load(**kw)
+        snapshot = str(pd.Timestamp(snapshot).date()) if snapshot is not None else loader.snapshot_date
+        if snapshot != cfg.snapshot_date:
+            cfg = dataclasses.replace(cfg, snapshot_date=snapshot)
     else:
         raise DataSourceError(f"unknown source {source!r}; expected one of {SOURCES}")
     if with_outcomes:
         df = derive_outcomes(df, arm_space, segmenter, cfg)
+    df.attrs["snapshot_date"] = snapshot
     return df
 
 
@@ -139,6 +155,8 @@ __all__ = [
     "ID_COLUMN",
     "INTERIM_COLUMNS",
     "KAGGLE_DATASET",
+    "KNOWN_SOURCES",
+    "LEGACY_FILENAME",
     "NULL_POLICY",
     "NUMERIC_COLUMNS",
     "OUTCOME_COLUMNS",

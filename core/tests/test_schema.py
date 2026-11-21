@@ -72,6 +72,7 @@ LC_STATUSES = {
     "Fully Paid", "Current", "Charged Off", "Late (31-120 days)", "In Grace Period",
     "Late (16-30 days)", "Does not meet the credit policy. Status:Fully Paid",
     "Does not meet the credit policy. Status:Charged Off", "Default",
+    "Issued",  # 2007-2020Q3 export only
 }
 
 

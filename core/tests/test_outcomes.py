@@ -152,8 +152,8 @@ class TestDefinitions:
         assert out["y_group"].tolist() == list("ABCDEFGABCDE")
 
     def test_unknown_status_warns_and_is_unresolved(self, loans):
-        loans.loc[0, "loan_status"] = "Issued"
-        with pytest.warns(UserWarning, match="Issued"):
+        loans.loc[0, "loan_status"] = "Withdrawn"
+        with pytest.warns(UserWarning, match="Withdrawn"):
             out = derive_outcomes(loans)
         assert not out.loc[0, "y_resolved"] and np.isnan(out.loc[0, "y_default"])
 

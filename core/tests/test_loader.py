@@ -1,6 +1,7 @@
 """LendingClubLoader: DuckDB projection/parsing, sampling, cache (SPEC §1.2-§1.3)."""
 
 import csv
+import gzip
 import json
 import os
 
@@ -10,9 +11,13 @@ import pandas as pd
 import pytest
 
 from bayesian_credit.config import MCTMConfig
+from bayesian_credit.data import load_loans
 from bayesian_credit.data.loader import (
     CANONICAL_COLUMNS,
+    DEFAULT_FILENAME,
     HASH_BUCKETS,
+    KNOWN_SOURCES,
+    LEGACY_FILENAME,
     STRING_DTYPE,
     LendingClubLoader,
     _hash_columns_sql,
@@ -360,6 +365,49 @@ class TestCanonicalHelpers:
 
 
 # ---------------------------------------------------------------------------------------
+# snapshot date of the source file
+# ---------------------------------------------------------------------------------------
+class TestSnapshot:
+    def test_unknown_file_infers_month_end_of_latest_payment(self, synth_csv, synth_table):
+        loader = LendingClubLoader(synth_csv, cache=False)
+        assert loader.known_source is None
+        latest = pd.Timestamp(synth_table["last_pymnt_d"].max())
+        assert loader.snapshot_date == (latest + pd.offsets.MonthEnd(0)).date().isoformat()
+
+    @pytest.mark.parametrize("name", [DEFAULT_FILENAME, LEGACY_FILENAME])
+    def test_known_files_use_their_published_snapshot(self, tmp_path, synth_table, name):
+        path = tmp_path / name
+        if name.endswith(".gz"):
+            plain = tmp_path / "plain.csv"
+            write_lc_csv(synth_table, plain)
+            with plain.open("rb") as src, gzip.open(path, "wb") as dst:
+                dst.write(src.read())
+        else:
+            write_lc_csv(synth_table, path)
+        loader = LendingClubLoader(path, cache=False)
+        assert loader.snapshot_date == KNOWN_SOURCES[name]["snapshot_date"]
+
+    def test_leading_unnamed_index_column_is_ignored(self, tmp_path, synth_table):
+        # the 2020Q3 export starts with an unnamed pandas row index
+        plain = tmp_path / "plain.csv"
+        write_lc_csv(synth_table.head(50), plain)
+        lines = plain.read_text().splitlines()
+        indexed = tmp_path / "indexed.csv"
+        indexed.write_text("\n".join([f",{lines[0]}"] + [f"{i},{line}" for i, line in enumerate(lines[1:])]) + "\n")
+        a = LendingClubLoader(plain, cache=False).load()
+        b = LendingClubLoader(indexed, cache=False).load()
+        pd.testing.assert_frame_equal(a, b)
+
+    def test_load_loans_censors_at_the_file_snapshot(self, tmp_path, synth_table):
+        path = tmp_path / DEFAULT_FILENAME
+        write_lc_csv(synth_table, path)
+        df = load_loans("lending_club", path=path, cache=False, with_outcomes=True)
+        assert df.attrs["snapshot_date"] == KNOWN_SOURCES[DEFAULT_FILENAME]["snapshot_date"]
+        forced = load_loans("lending_club", path=path, cache=False, with_outcomes=True, snapshot="2019-03-31")
+        assert forced.attrs["snapshot_date"] == "2019-03-31"
+
+
+# ---------------------------------------------------------------------------------------
 # the real Kaggle file (skipped when absent)
 # ---------------------------------------------------------------------------------------
 REAL_PATH = default_lending_club_path()
@@ -377,7 +425,7 @@ class TestRealFile:
         assert df["int_rate"].between(0.05, 0.31).all()
         assert set(df["term"]) <= {36, 60}
         assert set(df["home_ownership"]) <= {"MORTGAGE", "RENT", "OWN", "OTHER"}
-        assert df["verified_status_joint"].notna().any()
+        assert df["verified_status_joint"].dtype == STRING_DTYPE  # joint applications start in 2017
         assert df["emp_length"].isna().any()
         assert df["emp_length"].dropna().between(0, 10).all()
         derived = derive_outcomes(df)
@@ -386,8 +434,13 @@ class TestRealFile:
         assert panel.counts.sum() == panel.n_loan_months - panel.n_loans
 
     def test_describe_source_header(self):
-        info = LendingClubLoader(REAL_PATH, cache=False).describe_source(count_rows=False)
-        assert info["n_source_columns"] == 151
+        loader = LendingClubLoader(REAL_PATH, cache=False)
+        info = loader.describe_source(count_rows=False)
+        # the 2020Q3 export has 141 named columns plus a leading unnamed row index
+        expected = {DEFAULT_FILENAME: 142, LEGACY_FILENAME: 151}.get(REAL_PATH.name)
+        if expected is not None:
+            assert info["n_source_columns"] == expected
+            assert info["snapshot_date"] == KNOWN_SOURCES[REAL_PATH.name]["snapshot_date"] == loader.snapshot_date
         assert not info["missing_retained"]
         assert info["renamed"] == {"id": "loan_id", "verification_status_joint": "verified_status_joint"}
 
