@@ -356,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         kw = {"max_rows": args.max_rows, "seed": args.seed, "order": "random"}
     df, ds = prepare_dataset(args.source, out / "dataset.parquet", cfg=cfg, **kw)
+    cfg.data.snapshot_date = ds["snapshot_date"]  # the real file's own observation date
     timings["ingest"] = time.perf_counter() - t0
     print(f"[ingest] {len(df):,} loans in {timings['ingest']:.1f}s -> {ds['path']}", flush=True)
 
