@@ -10,12 +10,16 @@ from rest_framework import serializers
 
 from apps.common import schemas as S
 from apps.common.serializers import JobSerializer
-from apps.common.utils import parse_epoch, to_epoch
+from apps.common.utils import epoch_start, parse_epoch, to_epoch
+from apps.datasets.models import Dataset
 from apps.fits.models import Fit
+from apps.fits.serializers import apply_exclusions
 
 from .services import default_psi_settings
 
 FEEDBACK_MODES = ["simulated", "replay", "hybrid"]
+#: First streamed month of a fit-less cold start (the loans before it build the replay world).
+COLD_START_DEFAULT = "2015-01"
 BREAKER_MODES = ["pause", "auto_ack", "off"]
 
 
@@ -36,9 +40,22 @@ class PsiSettingsInputSerializer(serializers.Serializer):
 
 
 class SimulationCreateSerializer(serializers.Serializer):
-    """POST /simulations/ body."""
+    """POST /simulations/ body.
 
-    fit = serializers.IntegerField()
+    A warm run names a ``fit`` (its trained model warm-starts the policies). A cold start
+    (``cold_start: true``) runs the policies without an offline model; it names a ``fit`` to
+    reuse that fit's configuration and replay world, or just a ``dataset``: the replay world
+    is then built from the loans issued before ``start`` with the default configuration."""
+
+    fit = serializers.IntegerField(required=False, allow_null=True)
+    dataset = serializers.IntegerField(
+        required=False, allow_null=True, help_text="Cold start only: replay this dataset without a fit"
+    )
+    cold_start = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="Policies start from a flat prior and learn online only (no risk-model warm start)",
+    )
     name = serializers.CharField(max_length=200)
     policies = serializers.ListField(child=serializers.CharField(help_text=S.POLICY_HELP), allow_empty=False)
     feedback_mode = serializers.ChoiceField(choices=FEEDBACK_MODES, required=False, default="simulated")
@@ -74,14 +91,43 @@ class SimulationCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(str(exc)) from None
         return [s.label for s in specs]
 
-    def validate(self, attrs):
+    def _sources(self, attrs) -> tuple[Fit | None, Dataset, FrameworkConfig]:
+        """(fit, dataset, framework) of the run; a fit-less cold start gets the default
+        configuration with the dataset's snapshot and variable selection."""
+        cold = bool(attrs.get("cold_start"))
+        if attrs.get("fit") is not None:
+            try:
+                fit = Fit.objects.select_related("dataset", "job").get(pk=attrs["fit"])
+            except Fit.DoesNotExist:
+                raise serializers.ValidationError({"fit": [f"fit {attrs['fit']} does not exist"]}) from None
+            if attrs.get("dataset") is not None and attrs["dataset"] != fit.dataset_id:
+                raise serializers.ValidationError(
+                    {"dataset": [f"fit {fit.pk} was trained on dataset {fit.dataset_id}; omit dataset or match it"]}
+                )
+            return fit, fit.dataset, FrameworkConfig.from_dict(fit.framework or {})
+        if not cold:
+            raise serializers.ValidationError(
+                {"fit": ["A fit is required unless cold_start is true (then a dataset is enough)."]}
+            )
+        if attrs.get("dataset") is None:
+            raise serializers.ValidationError({"dataset": ["A cold start without a fit needs a dataset."]})
         try:
-            fit = Fit.objects.select_related("dataset", "job").get(pk=attrs["fit"])
-        except Fit.DoesNotExist:
-            raise serializers.ValidationError({"fit": [f"fit {attrs['fit']} does not exist"]}) from None
-        ds = fit.dataset
+            ds = Dataset.objects.select_related("job").get(pk=attrs["dataset"])
+        except Dataset.DoesNotExist:
+            raise serializers.ValidationError({"dataset": [f"dataset {attrs['dataset']} does not exist"]}) from None
         errors: dict[str, list[str]] = {}
-        start = parse_epoch(attrs.get("start") or fit.train_end, "start")
+        dims, hierarchy = apply_exclusions({}, ds, errors)
+        if errors:
+            raise serializers.ValidationError(errors)
+        raw: dict = {"hierarchy": hierarchy, "data": {"snapshot_date": ds.snapshot_date}}
+        if dims:
+            raw["segmentation"] = {"dimensions": list(dims)}
+        return None, ds, FrameworkConfig.from_dict(raw)
+
+    def validate(self, attrs):
+        fit, ds, framework = self._sources(attrs)
+        errors: dict[str, list[str]] = {}
+        start = parse_epoch(attrs.get("start") or (fit.train_end if fit is not None else COLD_START_DEFAULT), "start")
         end = parse_epoch(attrs.get("end") or ds.issue_max or "2018-12", "end")
         if start > end:
             errors.setdefault("start", []).append("start must not be after end")
@@ -89,7 +135,6 @@ class SimulationCreateSerializer(serializers.Serializer):
             errors.setdefault("start", []).append(f"start must leave a reference window after {ds.issue_min}")
         if ds.issue_max and end > ds.issue_max:
             errors.setdefault("end", []).append(f"end must not exceed the last dataset epoch {ds.issue_max}")
-        framework = FrameworkConfig.from_dict(fit.framework or {})
         psi = default_psi_settings(framework)
         given = dict(attrs.get("psi") or {})
         thresholds = dict(psi["thresholds"])
@@ -122,7 +167,12 @@ class SimulationCreateSerializer(serializers.Serializer):
                 )
         if errors:
             raise serializers.ValidationError(errors)
+        if fit is None:
+            # the replay world's reference is fitted on the loans issued before the stream
+            framework.train_end = epoch_start(start)
         attrs["fit_obj"] = fit
+        attrs["dataset_obj"] = ds
+        attrs["framework"] = framework.to_dict()
         attrs["config"] = {
             "policies": attrs["policies"],
             "feedback_mode": attrs.get("feedback_mode", "simulated"),
@@ -136,6 +186,7 @@ class SimulationCreateSerializer(serializers.Serializer):
             "breaker_mode": attrs.get("breaker_mode", "auto_ack"),
             "checkpoint_every": attrs.get("checkpoint_every", 6),
             "hindsight_sample": attrs.get("hindsight_sample", "elapsed"),
+            "cold_start": bool(attrs.get("cold_start")),
         }
         return attrs
 
@@ -145,9 +196,11 @@ class SimulationSerializer(serializers.Serializer):
 
     id = serializers.IntegerField()
     name = serializers.CharField()
-    fit = serializers.IntegerField()
-    fit_name = serializers.CharField()
+    fit = serializers.IntegerField(allow_null=True, help_text="null for a cold start without a fit")
+    fit_name = serializers.CharField(allow_null=True)
     dataset = serializers.IntegerField()
+    dataset_name = serializers.CharField()
+    cold_start = serializers.BooleanField()
     status = serializers.ChoiceField(
         choices=["queued", "running", "paused", "awaiting_review", "interrupted", "completed", "failed", "cancelled"]
     )

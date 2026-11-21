@@ -41,9 +41,11 @@ from apps.common.utils import (
     iso_from_any,
     num,
     parse_iso,
+    read_json,
     to_epoch,
     utcnow,
 )
+from apps.datasets.models import Dataset
 from apps.fits.models import Fit
 
 from .models import Simulation
@@ -96,9 +98,12 @@ def psi_config_from_settings(base: PSIConfig, settings: dict[str, Any]) -> PSICo
     return PSIConfig.from_dict(data)
 
 
-def core_configs(fit: Fit, config: dict[str, Any]) -> tuple[FrameworkConfig, SimulationConfig]:
-    """(FrameworkConfig, SimulationConfig) for the runner from the contract-shaped config."""
-    framework = FrameworkConfig.from_dict(fit.framework or {})
+def core_configs(
+    fit: Fit | None, config: dict[str, Any], framework: dict[str, Any] | None = None
+) -> tuple[FrameworkConfig, SimulationConfig]:
+    """(FrameworkConfig, SimulationConfig) for the runner from the contract-shaped config;
+    ``framework`` (core dict) replaces the fit's configuration (a fit-less cold start)."""
+    framework = FrameworkConfig.from_dict(framework if framework is not None else (fit.framework or {}))
     framework.psi = psi_config_from_settings(framework.psi, config["psi"])
     framework.bandit.interim_weight = float(config["interim_weight"])
     framework.validate()
@@ -115,17 +120,37 @@ def core_configs(fit: Fit, config: dict[str, Any]) -> tuple[FrameworkConfig, Sim
             "checkpoint_every": int(config["checkpoint_every"]),
             "psi_window_months": int(config["psi"]["window_months"]),
             "hindsight_sample": config.get("hindsight_sample", "elapsed"),
+            "cold_start": bool(config.get("cold_start")),
         }
     )
     return framework, simulation
 
 
-def create_simulation(fit: Fit, name: str, config: dict[str, Any]) -> Simulation:
-    """Create the row + run directory (``config.json``, ``progress.json``) and launch the worker."""
-    framework, simulation = core_configs(fit, config)
-    ds = fit.dataset
+def create_simulation(
+    fit: Fit | None,
+    name: str,
+    config: dict[str, Any],
+    *,
+    dataset: Dataset | None = None,
+    framework: dict[str, Any] | None = None,
+) -> Simulation:
+    """Create the row + run directory (``config.json``, ``progress.json``) and launch the worker.
+
+    ``fit=None`` (a cold start) needs ``dataset`` and ``framework``; the worker then fits the
+    replay world's reference into ``<run_dir>/fit``."""
+    if fit is None and (dataset is None or framework is None):
+        raise ValueError("a simulation without a fit needs a dataset and a framework configuration")
+    framework_cfg, simulation = core_configs(fit, config, framework)
+    ds = dataset if dataset is not None else fit.dataset
     with transaction.atomic():
-        sim = Simulation.objects.create(name=name, fit=fit, config=config, policies=list(config["policies"]))
+        sim = Simulation.objects.create(
+            name=name,
+            fit=fit,
+            dataset=ds,
+            framework=framework_cfg.to_dict(),
+            config=config,
+            policies=list(config["policies"]),
+        )
         run_dir = Path(sim.directory)
         sim.run_dir = str(run_dir)
         sim.save(update_fields=["run_dir"])
@@ -134,7 +159,7 @@ def create_simulation(fit: Fit, name: str, config: dict[str, Any]) -> Simulation
     artifacts.reset_dir(artifacts.simulation_dir(sim.pk))
     RunDirectory.create(
         run_dir,
-        framework,
+        framework_cfg,
         simulation,
         dataset={
             "id": ds.pk,
@@ -143,9 +168,9 @@ def create_simulation(fit: Fit, name: str, config: dict[str, Any]) -> Simulation
             "path": str(ds.parquet),
             "parquet": str(ds.parquet),
             "simulation_id": sim.pk,
-            "fit_id": fit.pk,
+            "fit_id": fit.pk if fit is not None else None,
         },
-        fit_dir=str(fit.directory),
+        fit_dir=str(fit.directory) if fit is not None else None,
     )
     job = JobRunner.create(Job.Kind.SIMULATION, target_type="simulation", target_id=sim.pk, params={"mode": "run"})
     sim.job = job
@@ -312,7 +337,32 @@ def completed_epochs(sim: Simulation) -> list[str]:
 def arm_space_of(sim: Simulation) -> ArmSpace:
     from apps.fits.services import fit_arm_space
 
-    return fit_arm_space(sim.fit)
+    if sim.fit_id:
+        return fit_arm_space(sim.fit)
+    path = sim.reference_fit_dir / "arm_space.json"
+
+    def build() -> ArmSpace:
+        saved = read_json(path)
+        if saved:
+            return ArmSpace.from_dict(saved)
+        return ArmSpace.from_config(FrameworkConfig.from_dict(sim.framework_dict).arms)
+
+    return cache.memo("sim_arm_space", (sim.pk, cache.file_key(path)), build)
+
+
+def reference_fitted(sim: Simulation):
+    """``FittedModels`` of the replay world: the fit's, or the run directory's own
+    (``None`` until a fit-less run has written it)."""
+    from apps.fits.services import load_fitted
+
+    if sim.fit_id:
+        return load_fitted(sim.fit)
+    path = sim.reference_fit_dir
+    if not (path / "two_stage.json").is_file():
+        return None
+    from bayesian_credit.pipeline import FittedModels
+
+    return cache.memo("sim_fitted", (sim.pk, cache.file_key(path / "two_stage.json")), lambda: FittedModels.load(path))
 
 
 def arm_row(arm_space: ArmSpace, arm: int) -> dict[str, Any]:
@@ -329,7 +379,7 @@ def arm_row(arm_space: ArmSpace, arm: int) -> dict[str, Any]:
 
 
 def group_dims(sim: Simulation, group: str) -> dict[str, str]:
-    dims = ((sim.fit.config or {}).get("segmentation") or {}).get("dimensions") or []
+    dims = sim.segmentation_dimensions
     parts = str(group).split("|")
     if len(parts) != len(dims):  # e.g. after a resegment the key has more parts
         dims = list(dims) + [f"dim{i}" for i in range(len(dims), len(parts))]
@@ -527,8 +577,10 @@ def simulation_payload(sim: Simulation, *, refresh: bool = True) -> dict[str, An
             "id": sim.pk,
             "name": sim.name,
             "fit": sim.fit_id,
-            "fit_name": sim.fit.name,
-            "dataset": sim.fit.dataset_id,
+            "fit_name": sim.fit.name if sim.fit_id else None,
+            "dataset": sim.source_dataset.pk,
+            "dataset_name": sim.source_dataset.name,
+            "cold_start": sim.cold_start,
             "status": status,
             "progress": progress,
             "pct": round(progress * 100, 1),
@@ -1128,7 +1180,7 @@ def append_api_event(sim: Simulation, etype: str, epoch: str | None, payload: di
 
 # ============================================================================ sentinel
 def _reference_window(sim: Simulation) -> dict[str, Any]:
-    ds = sim.fit.dataset
+    ds = sim.source_dataset
     start = to_epoch(sim.config.get("start"))
     ref_to = epoch_add(start, -1) if start else None
 
@@ -1386,9 +1438,9 @@ def buckets_payload(sim: Simulation, feature: str | None, epoch: str | None) -> 
     if feature not in features:
         raise ValidationError({"feature": [f"not a monitored feature; one of {', '.join(features)}"]})
     window = int(psi_cfg.get("window_months") or 3)
-    ds = sim.fit.dataset
+    ds = sim.source_dataset
     start = to_epoch(sim.config.get("start"))
-    framework = FrameworkConfig.from_dict(sim.fit.framework or {})
+    framework = FrameworkConfig.from_dict(sim.framework_dict)
 
     rebased_on = psi_reference(sim, epoch)
 
@@ -1480,12 +1532,12 @@ def _core_report(sim: Simulation) -> dict[str, Any] | None:
     or another epoch rebuilds it; ``report.json`` is the fallback if a rebuild fails.
     """
     from apps.common import artifacts
-    from apps.fits.services import latest_portfolio, load_fitted, portfolio_loan_row
+    from apps.fits.services import latest_portfolio, portfolio_loan_row
 
     rd = run_directory(sim)
     if not completed_epochs(sim):
         return None
-    job, shadow = latest_portfolio(sim.fit)
+    job, shadow = latest_portfolio(sim.fit) if sim.fit_id else (None, None)
     summary_file = artifacts.portfolio_dir(sim.fit_id, job.pk) / "summary.json" if job is not None else None
     key = (
         cache.file_key(rd.report_path, rd.timeseries_path, rd.events_path, rd.runtime_path, rd.sentinel_path),
@@ -1497,7 +1549,7 @@ def _core_report(sim: Simulation) -> dict[str, Any] | None:
         from bayesian_credit.pipeline import build_report
 
         try:
-            core = build_report(rd.path, fitted=load_fitted(sim.fit), shadow_summary=shadow, write=False)
+            core = build_report(rd.path, fitted=reference_fitted(sim), shadow_summary=shadow, write=False)
         except Exception:  # noqa: BLE001 - serve the runner's report rather than nothing
             logger.exception("could not rebuild the report of simulation %s", sim.pk)
             core = rd.read_report()
@@ -1577,13 +1629,13 @@ def report_payload(sim: Simulation) -> dict[str, Any] | None:
         {
             "simulation": sim.pk,
             "fit": sim.fit_id,
-            "dataset": sim.fit.dataset_id,
+            "dataset": sim.source_dataset.pk,
             "generated_at": iso_from_any(core.get("generated_at")) or iso(utcnow()),
             "status": "final" if final else "partial",
             "dimensions": dimensions,
             "runtime": runtime_stats(sim, core, events),
             "policy_summary": headline(sim),
-            "config": {"fit": sim.fit.config, "simulation": sim.config},
+            "config": {"fit": sim.fit.config if sim.fit_id else None, "simulation": sim.config},
             "details": core.get("dimensions") or {},
             "config_hashes": core.get("config_hashes") or {},
         }
