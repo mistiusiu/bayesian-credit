@@ -20,13 +20,14 @@ export function BanditPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Pipeline · Contextual bandit"
         title="Bandit lab"
         description="Historical borrowers replayed month by month; contextual Thompson sampling competes with UCB1, ε-greedy, random and the historical policy under delayed interim and terminal feedback."
       />
       <SimulationForm
         fitId={sel.fit?.status === 'ready' ? sel.fitId : null}
-        excluded={sel.dataset?.params.exclude_variables ?? []}
         datasetId={sel.dataset?.status === 'ready' ? sel.datasetId : null}
+        excluded={sel.dataset?.params.exclude_variables ?? []}
         datasetLoans={sel.dataset?.n_loans ?? null}
         onCreated={(s) => sel.setSim(s.id)}
       />

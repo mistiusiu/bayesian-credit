@@ -26,6 +26,7 @@ export function DataPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Pipeline · Data"
         title="Data"
         description="Lending Club 2007–2018 (or its synthetic twin) reduced to the 60 retained Table 3 variables, or any subset of them for ablations. The lifecycle stage of each variable is the leakage firewall: the bandit only ever sees pre-decision columns."
       />

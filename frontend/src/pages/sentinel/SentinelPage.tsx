@@ -55,6 +55,7 @@ export function SentinelPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Governance · Drift"
         title="Sentinel"
         description="Population Stability Index per monitored feature against the training reference (Table 9: < 0.10 normal, 0.10–0.25 watch, > 0.25 circuit breaker). Breaker trips require human review: resume, resegment or roll back."
       />

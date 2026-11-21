@@ -40,8 +40,9 @@ export function OverviewPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Shadow Lending Engine"
         title="Overview"
-        description="The closed loop of the shadow lending engine: borrower context → hierarchical risk → credit-state prediction → risk-adjusted reward → Thompson sampling → delayed outcomes → posterior update, governed by the PSI Sentinel."
+        description="The closed loop of the Shadow Lending Engine: borrower context → hierarchical risk → credit-state prediction → risk-adjusted reward → Thompson sampling → delayed outcomes → posterior update, governed by the PSI Sentinel."
       />
       <KpiRow dataset={ds} fit={fit} sim={sim} />
       <div className="mt-4">
@@ -59,7 +60,7 @@ export function OverviewPage() {
                   breakerOpen: sim?.breaker_state === 'open',
                 }}
                 historical={{ key: 'hist', title: 'Historical policy', to: '/shadow', metric: 'LC arms · reference' }}
-                shadow={{ key: 'shadow', title: 'Shadow engine', to: '/shadow', metric: sim?.uplift_vs_historical != null ? `uplift ${fmt.usdCompactSigned(sim.uplift_vs_historical)}` : '129 arms per borrower' }}
+                shadow={{ key: 'shadow', title: 'Shadow Engine', to: '/shadow', metric: sim?.uplift_vs_historical != null ? `uplift ${fmt.usdCompactSigned(sim.uplift_vs_historical)}` : '129 arms per borrower' }}
                 center={sim ? [`Epoch ${fmt.epoch(sim.current_epoch)}`, `${fmt.label(sim.status)} · ${fmt.pct(sim.progress, 0)} · ${sim.config.policies.length} policies`] : ['No simulation', 'create one in the Bandit lab']}
               />
             </div>

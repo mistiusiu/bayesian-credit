@@ -18,13 +18,14 @@ export function ShadowPage() {
   return (
     <>
       <PageHeader
-        title="Shadow engine"
+        eyebrow="Decisions · Counterfactual"
+        title="Shadow Lending Engine"
         description="Counterfactual policy evaluation (G.4, Table 8): for a historical borrower, every candidate arm is scored with the posterior predictive (default, recovery, credit transitions) and compared with the loan Lending Club actually issued. Nothing simulated is presented as an observed outcome."
       />
       {!fit && sel.loading ? (
         <Loading label="Resolving selection" height={240} />
       ) : !fit || !ready ? (
-        <Empty title={fit ? 'Fit is still running' : 'No fit selected'}>The shadow engine needs a ready Two-Stage Beta-Beta fit.</Empty>
+        <Empty title={fit ? 'Fit is still running' : 'No fit selected'}>The Shadow Lending Engine needs a ready Two-Stage Beta-Beta fit.</Empty>
       ) : (
         <>
           <div className="mb-4">
@@ -41,7 +42,7 @@ export function ShadowPage() {
           </div>
           <Tabs<Tab>
             scope="shadow"
-            label="Shadow engine views"
+            label="Shadow Lending Engine views"
             value={tab as Tab}
             onChange={setTab}
             tabs={[

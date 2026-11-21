@@ -30,7 +30,7 @@ export function PortfolioResultView({ result, fit }: { result: PortfolioResult; 
   const nLending = fit.n_arms !== null && fit.n_arms !== undefined ? fit.n_arms - (fit.config.arm_space.include_null ? 1 : 0) : null;
   const series = [
     { key: 'historical', label: 'Historical policy', color: policyColor('historical') },
-    { key: 'shadow', label: 'Shadow engine', color: 'var(--series-1)' },
+    { key: 'shadow', label: 'Shadow Engine', color: 'var(--series-1)' },
   ];
   return (
     <div className="space-y-4">
@@ -82,7 +82,7 @@ export function PortfolioResultView({ result, fit }: { result: PortfolioResult; 
           />
         </ChartFrame>
         <ChartFrame
-          title="What the shadow engine changed"
+          title="What the Shadow Lending Engine changed"
           caption="Each borrower is classified once, by the first class that applies in this order (declined → rescued → upsized → downsized → repriced down → repriced up → unchanged)."
           table={{ columns: [{ key: 'c', label: 'Class' }, { key: 'n', label: 'Borrowers', align: 'right' }, { key: 'd', label: 'Meaning' }], rows: CLASSES.map((c) => ({ c: c.label, n: fmt.int(s.counts[c.key] ?? 0), d: c.note })) }}
         >

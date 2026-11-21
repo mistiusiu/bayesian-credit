@@ -28,7 +28,7 @@ export function LoanBrowser({ datasetId }: { datasetId: number }) {
     void navigate(`/shadow?${s.toString()}`);
   };
   return (
-    <Card title="Loan browser" subtitle="Context, policy and outcome columns per loan. Select a row to evaluate it in the shadow engine.">
+    <Card title="Loan browser" subtitle="Context, policy and outcome columns per loan. Select a row to evaluate it in the Shadow Lending Engine.">
       <LoanFilters
         value={filters}
         onChange={(f) => {
