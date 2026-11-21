@@ -33,7 +33,7 @@ const byPolicy = (h: PolicyHeadline[], f: (p: PolicyHeadline) => number) => {
 
 export function buildReport(args: {
   simulation: number;
-  fit: number;
+  fit: number | null;
   dataset: number;
   final: boolean;
   metrics: FitMetrics;
@@ -41,7 +41,7 @@ export function buildReport(args: {
   timeseries: Timeseries;
   sentinel: SentinelTimeline;
   runtime: RuntimeStats;
-  fitConfig: FitConfig;
+  fitConfig: FitConfig | null;
   simConfig: SimulationConfig;
   generatedAt: string;
   topShare: Partial<Record<PolicyName, number>>;

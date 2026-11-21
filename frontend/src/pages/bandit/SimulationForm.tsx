@@ -17,9 +17,39 @@ const HINDSIGHT: { value: HindsightSample; label: string; title: string }[] = [
 
 const PSI_OPTIONS = [...PSI_FEATURES, 'emp_length', 'verification_status'];
 
-export function SimulationForm({ fitId, excluded = [], datasetLoans = null, onCreated }: { fitId: number | null; excluded?: string[]; datasetLoans?: number | null; onCreated: (s: Simulation) => void }) {
+type Knowledge = 'warm' | 'cold';
+const KNOWLEDGE: { value: Knowledge; label: string; title: string }[] = [
+  { value: 'warm', label: 'Warm · trained fit', title: 'Policies are warm-started from the fit’s risk model (an offline-trained model)' },
+  { value: 'cold', label: 'Cold · no offline model', title: 'Policies start from a flat prior and learn only from the rewards their own decisions earn' },
+];
+const WARM_POLICIES: PolicyName[] = ['thompson', 'ucb1', 'epsilon_greedy', 'historical', 'random'];
+const COLD_POLICIES: PolicyName[] = ['greedy', 'thompson', 'ucb1', 'epsilon_greedy', 'historical'];
+
+export function SimulationForm({
+  fitId,
+  datasetId = null,
+  excluded = [],
+  datasetLoans = null,
+  onCreated,
+}: {
+  fitId: number | null;
+  datasetId?: number | null;
+  excluded?: string[];
+  datasetLoans?: number | null;
+  onCreated: (s: Simulation) => void;
+}) {
   const [name, setName] = useState('');
-  const [policies, setPolicies] = useState<PolicyName[]>(['thompson', 'ucb1', 'epsilon_greedy', 'historical', 'random']);
+  const [knowledge, setKnowledgeState] = useState<Knowledge>('warm');
+  const [reuseFit, setReuseFit] = useState(true);
+  const [policies, setPolicies] = useState<PolicyName[]>(WARM_POLICIES);
+  const cold = knowledge === 'cold';
+  // a cold start needs no fit: without one (or by choice) the dataset alone is replayed
+  const useFit = !cold || (reuseFit && fitId !== null);
+  const ready = useFit ? fitId !== null : datasetId !== null;
+  const setKnowledge = (k: Knowledge) => {
+    setKnowledgeState(k);
+    setPolicies(k === 'cold' ? COLD_POLICIES : WARM_POLICIES);
+  };
   const [feedback, setFeedback] = useState<FeedbackMode>('simulated');
   const [start, setStart] = useState('2015-01');
   const [end, setEnd] = useState('2018-12');
@@ -44,11 +74,12 @@ export function SimulationForm({ fitId, excluded = [], datasetLoans = null, onCr
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (fitId === null) return;
+    if (!ready) return;
     create.mutate(
       {
-        fit: fitId,
-        name: name.trim() || `${policies.map((p) => policyLabel(p)).join(' vs ')} · ${feedback}`,
+        ...(useFit ? { fit: fitId } : { dataset: datasetId }),
+        cold_start: cold,
+        name: name.trim() || `${cold ? 'Cold start · ' : ''}${policies.map((p) => policyLabel(p)).join(' vs ')} · ${feedback}`,
         policies,
         feedback_mode: feedback,
         start,
@@ -69,6 +100,30 @@ export function SimulationForm({ fitId, excluded = [], datasetLoans = null, onCr
   return (
     <Disclosure title="New simulation" subtitle="Replay 2015–2018 borrowers through competing policies (background job, checkpointed)">
       <form onSubmit={submit} className="space-y-4" noValidate>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-ink-2">Starting knowledge</span>
+          <Segmented<Knowledge> label="Starting knowledge" value={knowledge} onChange={setKnowledge} options={KNOWLEDGE} />
+          <p className="max-w-3xl text-2xs text-muted">
+            {cold
+              ? 'Cold start: every policy begins from the flat prior N(0, 1000²) with no risk-model warm start, the position of a lender entering a market it has no history in. Exploration now matters: Greedy ties at μ = 0 on every arm and never leaves Decline, while Thompson, UCB1 and ε-greedy learn to lend from their own outcomes. The replay world, guardrails, Sentinel and hindsight yardstick are the same as in a warm run, so the two are directly comparable.'
+              : 'Warm start: policies begin from the fit’s risk model (μ, σ of every arm from the Two-Stage Beta-Beta posterior). Pure exploitation does well here because the model already knows the borrowers.'}
+          </p>
+          {errs.cold_start && <p className="text-2xs text-delta-bad">{errs.cold_start.join(' ')}</p>}
+          {errs.dataset && <p className="text-2xs text-delta-bad">{errs.dataset.join(' ')}</p>}
+        </div>
+        {cold && (
+          <Toggle
+            checked={reuseFit && fitId !== null}
+            onChange={setReuseFit}
+            disabled={fitId === null}
+            label={fitId !== null ? `Reuse fit #${fitId}’s replay world` : 'No fit needed'}
+            description={
+              fitId !== null
+                ? 'On: the world (arm grid, groups, MCTM, rate card) comes from the selected fit, matching its warm runs exactly. Off: the run needs no fit; the world is fitted on the loans issued before the first epoch.'
+                : 'This dataset has no ready fit, and a cold start does not need one: the replay world is fitted on the loans issued before the first epoch.'
+            }
+          />
+        )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Field label="Name" error={errs.name}>
             {(id) => <TextInput id={id} value={name} placeholder="auto" onChange={(e) => setName(e.target.value)} />}
@@ -137,10 +192,18 @@ export function SimulationForm({ fitId, excluded = [], datasetLoans = null, onCr
         </div>
         <FormError message={create.error && !Object.keys(errs).length ? create.error.message : null} />
         <div className="flex items-center gap-3">
-          <Button type="submit" variant="primary" icon="play" loading={create.isPending} disabled={fitId === null || !policies.length || !features.length}>
-            Start simulation
+          <Button type="submit" variant="primary" icon="play" loading={create.isPending} disabled={!ready || !policies.length || !features.length}>
+            {cold ? 'Start cold-start simulation' : 'Start simulation'}
           </Button>
-          <span className="text-xs text-muted">{fitId === null ? 'Select a ready fit first.' : `with fit #${fitId}`}</span>
+          <span className="text-xs text-muted">
+            {!ready
+              ? cold
+                ? 'Select a ready dataset first.'
+                : 'Select a ready fit first, or switch to a cold start (no fit needed).'
+              : useFit
+                ? `${cold ? 'cold start in ' : 'with '}fit #${fitId}${cold ? '’s world' : ''}`
+                : `cold start on dataset #${datasetId}, no fit`}
+          </span>
         </div>
       </form>
     </Disclosure>

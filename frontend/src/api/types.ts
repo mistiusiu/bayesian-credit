@@ -1156,13 +1156,22 @@ export interface SimulationConfig {
   checkpoint_every: number;
   /** Sample of the hindsight oracle's model: loans whose term elapsed (default) or all resolved loans. */
   hindsight_sample: HindsightSample;
+  /**
+   * Cold start: the policies run without an offline-trained model (flat priors, no risk-model
+   * warm start) and learn online only. The replay world is the same as in a warm run.
+   */
+  cold_start?: boolean;
 }
 
 export type HindsightSample = 'elapsed' | 'resolved';
 
 /** POST /simulations/ → 201 {@link Simulation}. Omitted fields take the defaults in docs/API.md. */
 export interface SimulationCreate {
-  fit: Id;
+  /** Required for a warm run; optional for a cold start (then `dataset` is enough). */
+  fit?: Id | null;
+  /** Cold start without a fit: replay this dataset (the world is fitted on the loans before `start`). */
+  dataset?: Id | null;
+  cold_start?: boolean;
   name: string;
   policies: PolicyName[];
   feedback_mode?: FeedbackMode;
@@ -1208,9 +1217,13 @@ export interface RecoveryInfo {
 export interface Simulation {
   id: Id;
   name: string;
-  fit: Id;
-  fit_name: string;
+  /** null for a cold start that runs without a trained fit. */
+  fit: Id | null;
+  fit_name: string | null;
   dataset: Id;
+  dataset_name: string;
+  /** Policies ran without an offline model (same as `config.cold_start`). */
+  cold_start: boolean;
   status: SimulationStatus;
   progress: Fraction;
   config: SimulationConfig;
@@ -1600,14 +1613,15 @@ export interface RuntimeStats {
 /** GET /simulations/{id}/report/ — `status` "partial" while the run is not completed. */
 export interface EvaluationReport {
   simulation: Id;
-  fit: Id;
+  /** null for a cold start that ran without a trained fit. */
+  fit: Id | null;
   dataset: Id;
   generated_at: IsoDateTime;
   status: 'final' | 'partial';
   dimensions: ReportDimension[];
   runtime: RuntimeStats;
   policy_summary: PolicyHeadline[];
-  config: { fit: FitConfig; simulation: SimulationConfig };
+  config: { fit: FitConfig | null; simulation: SimulationConfig };
   /** Raw evaluation blocks keyed by Table 11 dimension (served; typed where the console reads them). */
   details?: ReportDetails;
   config_hashes?: Record<string, string>;

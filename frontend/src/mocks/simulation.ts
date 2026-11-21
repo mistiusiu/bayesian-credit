@@ -45,6 +45,8 @@ export interface SimSeries {
   policies: Map<PolicyName, PolicySeries>;
   sentinel: SentinelSeries;
   shiftIdx: number;
+  /** Policies started without an offline model (flat priors). */
+  coldStart: boolean;
 }
 
 /** Learning curves by policy kind (spec labels such as `ucb1(ucb_c=1.0)` use their base kind). */
@@ -162,8 +164,13 @@ export function simSeries(
   const ackIdx = decision?.ackEpoch ? epochs.indexOf(decision.ackEpoch) : -1;
   const rebased = !!decision?.action && decision.action !== 'resume';
 
+  // cold start: no warm start, so learners begin at the random policy's level and converge
+  // more slowly; greedy ties at μ = 0 on every arm and never leaves the decline arm
+  const cold = !!cfg.cold_start;
+  const coldGreedy = (p: PolicyName) => cold && policyBase(p) === 'greedy';
   const gapFraction = (p: PolicyName, floorScale: number) => {
-    const L = LEARNER[policyBase(p)];
+    const L0 = LEARNER[policyBase(p)];
+    const L = L0 && cold ? { start: 1, floor: Math.min(0.9, L0.floor * 1.3), tau: L0.tau * 1.8 } : L0;
     let clock = 0;
     return epochs.map((_, e) => {
       if (!L) return 0;
@@ -183,6 +190,7 @@ export function simSeries(
       const kind = policyBase(p);
       if (kind === 'historical') out.set(p, histPer.slice());
       else if (kind === 'random') out.set(p, floorU.slice());
+      else if (coldGreedy(p)) out.set(p, epochs.map(() => 0));
       else {
         const g = gapFraction(p, floorScale);
         out.set(p, epochs.map((_, e) => oracle[e] - g[e] * (oracle[e] - floorU[e])));
@@ -197,7 +205,7 @@ export function simSeries(
   for (let it = 0; it < 12; it++) {
     const ok =
       (!per.has('epsilon_greedy') || !per.has('historical') || cum('epsilon_greedy') > cum('historical') * 1.02) &&
-      (!per.has('greedy') || !per.has('historical') || cum('greedy') > cum('historical') * 1.01);
+      (cold || !per.has('greedy') || !per.has('historical') || cum('greedy') > cum('historical') * 1.01);
     if (ok) break;
     floorScale *= 0.8;
     per = build(floorScale);
@@ -231,6 +239,7 @@ export function simSeries(
       const s = new Float64Array(K);
       if (kind === 'historical') s.set(histShare);
       else if (kind === 'random') s.set(uniform);
+      else if (coldGreedy(p) && nullArm >= 0) s[nullArm] = 1;
       else
         for (const g of groups) {
           const gs = shareIn(kind, focus[e], broad, g);
@@ -240,13 +249,14 @@ export function simSeries(
     });
     policies.set(p, { policy: p, perDecision: r, reward, regret, realized, focus, shares });
   }
-  return { epochs, n, oracle, groups, broad, uniform, histShare, policies, sentinel, shiftIdx };
+  return { epochs, n, oracle, groups, broad, uniform, histShare, policies, sentinel, shiftIdx, coldStart: cold };
 }
 
 /** Group-level share vector of policy p at epoch e. */
 export function groupShare(series: SimSeries, p: PolicyName, e: number, g: GroupMeta): Float64Array {
   const ps = series.policies.get(p);
   if (!ps) return new Float64Array(series.broad.length);
+  if (series.coldStart && policyBase(p) === 'greedy') return ps.shares[e];
   return shareIn(policyBase(p), ps.focus[e], series.broad, g);
 }
 
@@ -275,8 +285,10 @@ export function armPosterior(
   const persistent = new Rng(seedOf('pnoise', g.key, arm, p)).normal();
   const wobble = new Rng(seedOf('pwobble', g.key, arm, e, p)).normal();
   const noise = (0.9 * persistent + 0.25 * wobble) * (r.std / Math.sqrt(nEff + 4));
-  const mu = truth + (r.mean - truth) * (k0 / (k0 + nEff)) + noise;
-  const sd = r.std * (0.95 + 0.1 * (k0 / (k0 + nEff)));
+  // warm start: the risk model's reward; cold start: the flat prior N(0, 1000²)
+  const prior = series.coldStart ? 0 : r.mean;
+  const mu = truth + (prior - truth) * (k0 / (k0 + nEff)) + noise;
+  const sd = series.coldStart && nEff < 1 ? 1000 : r.std * (0.95 + 0.1 * (k0 / (k0 + nEff)));
   // thompson_se samples from N(μ, σ²/n): the posterior scale is the standard error of the mean
   return { mu, sigma: kind === 'thompson_se' ? sd / Math.sqrt(Math.max(1, nEff)) : sd, n: nEff };
 }

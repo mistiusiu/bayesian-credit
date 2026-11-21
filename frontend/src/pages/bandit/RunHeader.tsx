@@ -9,6 +9,7 @@ import { ProgressBar } from '@/components/ui/Progress';
 import { fmt } from '@/lib/format';
 import { BREAKER_LABEL, BREAKER_TONE } from '@/lib/palette';
 import { selectionSearch } from '@/lib/selection';
+import { StartBadge } from './RunsTable';
 
 /** Run status, lifecycle controls and the kill → resume-from-checkpoint record (G.6). */
 export function RunHeader({ sim }: { sim: Simulation }) {
@@ -27,10 +28,11 @@ export function RunHeader({ sim }: { sim: Simulation }) {
               #{sim.id} {sim.name}
             </h2>
             <StatusBadge status={sim.status} />
+            <StartBadge sim={sim} />
             <Badge tone={BREAKER_TONE[sim.breaker_state]}>breaker {BREAKER_LABEL[sim.breaker_state].toLowerCase()}</Badge>
           </div>
           <p className="num mt-1 text-xs text-muted">
-            fit #{sim.fit} · {sim.config.policies.length} policies · {sim.config.feedback_mode} feedback · {sim.config.start} → {sim.config.end} · {sim.config.max_loans ? `${fmt.compact(sim.config.max_loans)} loans` : 'all loans'} · seed {sim.config.seed}{sim.config.hindsight_sample ? ` · hindsight on ${sim.config.hindsight_sample === 'elapsed' ? 'term-elapsed' : 'all resolved'} loans` : ''}
+            {sim.fit === null ? `dataset #${sim.dataset} ${sim.dataset_name}, no fit` : `fit #${sim.fit}`} · {sim.config.policies.length} policies · {sim.config.feedback_mode} feedback · {sim.config.start} → {sim.config.end} · {sim.config.max_loans ? `${fmt.compact(sim.config.max_loans)} loans` : 'all loans'} · seed {sim.config.seed}{sim.config.hindsight_sample ? ` · hindsight on ${sim.config.hindsight_sample === 'elapsed' ? 'term-elapsed' : 'all resolved'} loans` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

@@ -40,8 +40,9 @@ export function useSelection(): Selection {
   const fitValid = pFit !== null && (!fitQ.data || fits.some((f) => f.id === pFit));
   const fitId = fitValid ? pFit : (fits.find((f) => f.status === 'ready')?.id ?? fits[0]?.id ?? null);
 
-  const simQ = useSimulations(fitId, fitId !== null);
-  const sims = fitId === null ? [] : (simQ.data?.results ?? []);
+  // the selected fit's runs plus the dataset's cold starts that ran without any fit
+  const simQ = useSimulations(null, datasetId !== null, datasetId);
+  const sims = datasetId === null ? [] : (simQ.data?.results ?? []).filter((s) => s.fit === null || s.fit === fitId);
   const pSim = toId(params.get('sim'));
   const simValid = pSim !== null && (!simQ.data || sims.some((s) => s.id === pSim));
   const simId = simValid ? pSim : (sims.find((s) => s.status === 'completed')?.id ?? sims[0]?.id ?? null);
@@ -73,7 +74,7 @@ export function useSelection(): Selection {
     datasets,
     fits,
     sims,
-    loading: dsQ.isPending || (datasetId !== null && fitQ.isPending) || (fitId !== null && simQ.isPending),
+    loading: dsQ.isPending || (datasetId !== null && (fitQ.isPending || simQ.isPending)),
     setDataset: useCallback((id) => write({ dataset: id }, ['fit', 'sim']), [write]),
     setFit: useCallback((id) => write({ fit: id }, ['sim']), [write]),
     setSim: useCallback((id) => write({ sim: id }, []), [write]),

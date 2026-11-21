@@ -28,7 +28,7 @@ function ReportView({ r, sim }: { r: EvaluationReport; sim: Simulation }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="num flex flex-wrap items-center gap-2 text-xs text-ink-2">
           <Badge tone={r.status === 'final' ? 'good' : 'info'}>{r.status === 'final' ? 'Final report' : 'Partial (run not finished)'}</Badge>
-          simulation #{r.simulation} · fit #{r.fit} · dataset #{r.dataset} · generated {fmt.dateTime(r.generated_at)}
+          simulation #{r.simulation} · {r.fit === null ? 'cold start, no fit' : `fit #${r.fit}`}{r.config.simulation.cold_start && r.fit !== null ? ' (cold start)' : ''} · dataset #{r.dataset} · generated {fmt.dateTime(r.generated_at)}
         </p>
         <Button icon="download" onClick={() => download(r)}>
           Download JSON
