@@ -309,7 +309,7 @@ Eight pages that make the loop visible: the hierarchy explorer with posterior me
 ```bash
 # clone + data
 git clone https://github.com/mistiusiu/bayesian-credit.git && cd bayesian-credit
-scripts/download_data.sh                 # Kaggle token in ~/.kaggle/access_token; or skip and use the synthetic twin
+scripts/download_data.sh                 # Lending Club 2007-2020Q3 (Kaggle token in ~/.kaggle/access_token); --legacy for the 2018Q4 export; or skip and use the synthetic twin
 
 # backend
 poetry install --with dev && eval $(poetry env activate)   # Poetry 2: .venv/ with core (editable), API, dev tools
