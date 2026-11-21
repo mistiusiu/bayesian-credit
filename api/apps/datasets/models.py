@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from bayesian_credit.config import DataConfig
 from django.db import models
 
 from apps.common import artifacts
@@ -52,3 +53,9 @@ class Dataset(BuildStatusMixin, models.Model):
     @property
     def parquet(self) -> Path:
         return Path(self.parquet_path) if self.parquet_path else self.directory / "loans.parquet"
+
+    @property
+    def snapshot_date(self) -> str:
+        """The day the loans' statuses were observed (outcomes are censored there); the
+        real file's own snapshot (``summary.snapshot_date``), else the DataConfig default."""
+        return str((self.summary or {}).get("snapshot_date") or DataConfig().snapshot_date)

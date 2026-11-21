@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from bayesian_credit.data.loader import KNOWN_SOURCES
 from bayesian_credit.data.schema import NUMERIC_COLUMNS, PRE_DECISION_COLUMNS, validate_exclusion
 from bayesian_credit.data.synthetic import DEFAULT_SHIFT, DEFAULT_SHIFT_AT
 from django.conf import settings
@@ -74,8 +75,6 @@ class DatasetCreateSerializer(serializers.Serializer):
         issue_to = issue_to or "2018-12"
         if synthetic and issue_to > "2019-03":
             errors.setdefault("issue_to", []).append("Synthetic loans cannot be issued after the 2019-03 snapshot.")
-        if not synthetic and not ("2007-06" <= issue_from and issue_to <= "2018-12"):
-            errors.setdefault("issue_from", []).append("Lending Club issue dates span 2007-06 to 2018-12.")
         if issue_from > issue_to:
             errors.setdefault("issue_to", []).append("Must not precede issue_from.")
 
@@ -94,6 +93,11 @@ class DatasetCreateSerializer(serializers.Serializer):
                     f"File not found: {candidate}. Run scripts/download_data.sh or use source='synthetic'."
                 )
             path = str(candidate)
+            known = KNOWN_SOURCES.get(candidate.name) or {"issue_min": "2007-06", "issue_max": "2020-09"}
+            if not (known["issue_min"] <= issue_from and issue_to <= known["issue_max"]):
+                errors.setdefault("issue_from", []).append(
+                    f"Lending Club issue dates in {candidate.name} span {known['issue_min']} to {known['issue_max']}."
+                )
 
         shift = None
         raw_shift = attrs.get("shift")

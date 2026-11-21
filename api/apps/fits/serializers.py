@@ -227,7 +227,7 @@ class FitCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(errors)
         rec = dict(attrs.get("recovery") or {})
         mctm = dict(attrs.get("mctm") or {})
-        data = {}
+        data = {"snapshot_date": ds.snapshot_date}  # censor where the dataset's file was observed
         if "basis" in rec:
             data["recovery_basis"] = rec["basis"]
         if "chargeoff_lag_months" in mctm:
