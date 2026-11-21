@@ -31,7 +31,7 @@ export function Badge({ tone = 'neutral', children, className, title, pulse }: {
   return (
     <span
       title={title}
-      className={cn('inline-flex h-5 items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-surface px-2 text-2xs font-medium text-ink-2', className)}
+      className={cn('inline-flex h-5 items-center gap-1.5 whitespace-nowrap rounded border border-line bg-surface px-1.5 text-2xs font-medium text-ink-2', className)}
     >
       <StatusGlyph tone={tone} pulse={pulse} />
       {children}
