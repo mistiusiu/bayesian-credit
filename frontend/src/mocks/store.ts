@@ -72,7 +72,11 @@ export interface FitRec {
 export interface SimRec {
   id: number;
   name: string;
+  /** Fit whose model stands in for the replay world (the run's own fit unless `hasFit` is false). */
   fitId: number;
+  datasetId: number;
+  /** false: a cold start created from a dataset alone (served as `fit: null`). */
+  hasFit: boolean;
   config: SimulationConfig;
   createdMs: number;
   jobId: number;
@@ -393,6 +397,8 @@ function seed(): void {
     id,
     name,
     fitId: baselineFit,
+    datasetId: db.fits.get(baselineFit)!.datasetId,
+    hasFit: true,
     config,
     createdMs,
     jobId: newJob('simulation', { type: 'simulation', id }, createdMs + 4000, 0).id,
@@ -507,6 +513,36 @@ function seed(): void {
     r.note = 'auto-acknowledged after 1 epoch(s)';
     r.segAfter = refine(r.segBefore);
   }
+
+  // Sim 3 — completed cold start without a fit: no offline model, greedy never leaves the decline arm
+  const s3 = simBase(
+    db.next.sim++,
+    'Cold start · no offline model · greedy vs explorers',
+    {
+      policies: ['greedy', 'thompson', 'ucb1', 'epsilon_greedy', 'historical'],
+      feedback_mode: 'simulated',
+      start: '2015-01',
+      end: '2018-12',
+      max_loans: 50000,
+      seed: 42,
+      interim_months: 12,
+      interim_weight: 0.5,
+      psi: DEFAULT_PSI,
+      breaker_mode: 'off',
+      checkpoint_every: 6,
+      hindsight_sample: 'elapsed',
+      cold_start: true,
+    },
+    T0 - 30 * HOUR,
+    9400,
+  );
+  s3.hasFit = false;
+  db.sims.set(s3.id, s3);
+  for (let k = 0; k < 48; k++) s3.epochTs.push(s3.startMs + (k + 1) * s3.msPerEpoch);
+  s3.markDone = 48;
+  s3.done = 48;
+  s3.status = 'completed';
+  s3.finishedMs = s3.epochTs[47];
 
   // One finished portfolio evaluation on the baseline fit
   const pj = newJob('shadow_portfolio', { type: 'fit', id: baselineFit }, T0 - 20 * HOUR, 52_000);

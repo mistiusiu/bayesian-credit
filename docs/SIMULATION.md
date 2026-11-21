@@ -353,3 +353,64 @@ larger loans than the lender issued. `PortfolioSummary.uplift_decomposition` sep
 repricing, resizing and term choice; `recommendation_mix`,
 `bandit_performance.selection_mix` and `by_risk_aversion` show how the mix moves with the
 risk appetite λ.
+
+## 11. Cold start: the policies without an offline model
+
+**Why.** Warm-started from a risk model fitted on 2–3 years of history, pure exploitation
+(Greedy) does very well on Lending Club: the model already knows the borrowers, so acting
+on its expected reward is close to optimal and exploration only costs money. A lender that
+enters a market it has no history in has no such model. Exploration is then how it learns at
+all. `SimulationConfig.cold_start` reproduces that position so the two regimes can be
+compared on the same data.
+
+**What changes** (`cold_start=True`; nothing else does):
+
+* every policy's warm start defaults to `"flat"`: each arm starts at N(`bandit.prior_mu`,
+  `bandit.prior_sigma`²) = N(0, 1000²) (with no pseudo-count, so the first reward replaces
+  the prior mean);
+* no policy receives the environment's `prior_provider`, so no policy ever reads the risk
+  model. That holds on the first decision, after a resegmentation and after a resume. A spec
+  may still ask for `warm_start=global` (new groups copy the pooled posterior the policy
+  learned itself); `warm_start=risk_model` has no provider and degrades to `global`;
+* `RunStarted` and `config.json` record `cold_start: true`. The config hash ignores the field
+  while it is `false`, so checkpoints of older runs still resume.
+
+**What stays the same.** The replay world is the same as in a warm run: the learning
+environment, the delayed-feedback queue, the lending guardrails, the PSI Sentinel and the
+hindsight yardstick. `oracle_reward`, eligibility and the historical policy's decisions are
+identical between a warm and a cold run of one configuration (tested), so `cum_reward` and
+`regret` compare directly. Without a fitted model (`fitted=None`), a cold start fits the
+world's reference (arm grid, groups, MCTM, rate card, prepayment table) on the loans issued
+before `start` and saves it to `<run_dir>/fit`. This is the simulator's model of reality,
+never the decision-maker's.
+
+**What to expect.** With flat priors every arm has μ = 0 and Greedy breaks ties towards the
+lowest index, which is Decline, whose reward is exactly 0. Cold Greedy therefore never
+lends: the exploitation trap in its starkest form. UCB1 tries every arm first, ε-greedy
+explores at rate ε, and Thompson sampling draws from N(0, 1000²) until it has data; all three
+learn to lend from their own outcomes, with regret that flattens over time instead of growing
+linearly. `greedy(prior_mu=500)` gives an optimistic Greedy (optimism as exploration);
+`thompson_se` shrinks faster than `thompson` once data arrive.
+
+**First result (2026-11-21).** 300k random loans from the 2007–2020Q3 export; world fitted on
+loans issued before 2015-01; 30,000 borrowers streamed 2015-01..2018-12; simulated feedback;
+`scripts/run_pipeline.py --source lending_club --max-rows 300000 --max-loans 30000
+--policies greedy,thompson,epsilon_greedy,ucb1,historical [--cold-start]`:
+
+| policy | warm: cum. expected | warm: cum. regret | cold: cum. expected | cold: cum. regret | cold: decline |
+|---|---|---|---|---|---|
+| greedy | **$44.93M** | $37.68M | $0 | $82.61M | 100 % |
+| thompson | $42.20M | $40.40M | $37.88M | $44.73M | 1.7 % |
+| ε-greedy | $43.16M | $39.45M | $32.43M | $50.18M | 12.7 % |
+| ucb1 | $39.72M | $42.89M | **$39.68M** | $42.93M | 0.4 % |
+| historical | $12.37M | $70.24M | $12.37M | $70.24M | 0 % |
+
+Warm-started, Greedy wins (the model already knows these borrowers). Without the offline
+model, Greedy collapses to Decline and earns nothing. UCB1 and Thompson lose little or
+nothing (UCB1 $39.68M cold vs $39.72M warm), so their exploration is what replaces the
+missing history.
+
+**Running it.** API: `POST /simulations/` with `cold_start: true` and a `dataset` (no fit
+needed) or a `fit` (reuse its world). Console: Bandit lab → New simulation → *Starting
+knowledge: Cold*. CLI: `scripts/run_pipeline.py --cold-start --policies
+greedy,thompson,epsilon_greedy,ucb1,historical`.

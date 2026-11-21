@@ -331,7 +331,14 @@ class SimulationConfig(ConfigMixin):
     hindsight yardstick's risk model is fitted on: ``"elapsed"`` (default) = resolved loans
     whose term had elapsed by the snapshot, an unbiased view of lifetime default;
     ``"resolved"`` = every resolved loan (the original protocol; recent vintages' resolved
-    loans are mostly early defaults, which inflates the yardstick's default rates)."""
+    loans are mostly early defaults, which inflates the yardstick's default rates).
+
+    ``cold_start`` (**[decision]**, docs/SIMULATION.md §11) runs the decision-makers without
+    an offline-trained model: every policy starts from the flat prior
+    N(``bandit.prior_mu``, ``bandit.prior_sigma``²) and never sees the risk model's warm
+    start (no ``prior_provider``), so it knows only the rewards its own decisions earn
+    online. The replay world (environment, hindsight yardstick, guardrails, Sentinel) is the
+    same as in a warm run, so warm and cold runs of one policy are directly comparable."""
 
     start: str = "2015-01-01"
     end: str = "2018-12-31"
@@ -346,6 +353,7 @@ class SimulationConfig(ConfigMixin):
     oracle: str = "hindsight"
     posterior_snapshot_every: int = 3
     hindsight_sample: str = "elapsed"  # "elapsed" | "resolved"
+    cold_start: bool = False  # policies learn online from a flat prior (no offline model)
 
     def __post_init__(self) -> None:
         if isinstance(self.feedback_mode, str):

@@ -639,6 +639,9 @@ class SimulationConfigSerializer(serializers.Serializer):
     breaker_mode = serializers.ChoiceField(choices=["pause", "auto_ack", "off"])
     checkpoint_every = serializers.IntegerField()
     hindsight_sample = serializers.ChoiceField(choices=["elapsed", "resolved"], required=False)
+    cold_start = serializers.BooleanField(
+        required=False, help_text="Policies ran without an offline model (flat priors, online learning only)"
+    )
 
 
 class PolicyHeadlineSerializer(serializers.Serializer):

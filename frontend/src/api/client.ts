@@ -200,7 +200,7 @@ export const api = {
     portfolioGet: (id: Id, jobId: Id) => get<PortfolioResult>(`/fits/${id}/shadow/portfolio/${jobId}/`),
   },
   simulations: {
-    list: (fit?: Id | null) => page<Simulation>('/simulations/', { fit, limit: 200 }),
+    list: (fit?: Id | null, dataset?: Id | null) => page<Simulation>('/simulations/', { fit, dataset, limit: 200 }),
     get: (id: Id) => get<Simulation>(`/simulations/${id}/`),
     create: (body: SimulationCreate) => post<Simulation>('/simulations/', body),
     timeseries: (id: Id, policy?: PolicyName) => get<Timeseries>(`/simulations/${id}/timeseries/`, { policy }),
@@ -236,7 +236,7 @@ export const qk = {
   shadow: (fit: Id, req: ShadowEvaluateRequest) => ['fits', fit, 'shadow', req] as const,
   portfolios: (fit: Id) => ['fits', fit, 'portfolio'] as const,
   portfolio: (fit: Id, job: Id) => ['fits', fit, 'portfolio', job] as const,
-  simulations: (fit?: Id | null) => ['simulations', 'list', fit ?? null] as const,
+  simulations: (fit?: Id | null, dataset?: Id | null) => ['simulations', 'list', fit ?? null, dataset ?? null] as const,
   simulation: (id: Id) => ['simulations', id] as const,
   simPart: (id: Id, part: string, q?: object) => ['simulations', id, part, q ?? null] as const,
   reviews: (q: object) => ['reviews', q] as const,
@@ -365,10 +365,11 @@ export const usePortfolio = (fit: Id | null | undefined, job: Id | null | undefi
     refetchInterval: (q) => (q.state.data && ['queued', 'running'].includes(q.state.data.job.status) ? POLL_MS : false),
   });
 
-export const useSimulations = (fit?: Id | null, enabled = true) =>
+/** Runs of a fit, or (`dataset`) every run on a dataset, fit-less cold starts included. */
+export const useSimulations = (fit?: Id | null, enabled = true, dataset?: Id | null) =>
   useQuery({
-    queryKey: qk.simulations(fit),
-    queryFn: () => api.simulations.list(fit),
+    queryKey: qk.simulations(fit, dataset),
+    queryFn: () => api.simulations.list(fit, dataset),
     enabled,
     refetchInterval: (q) => (q.state.data?.results.some(simLive) ? POLL_MS : false),
   });

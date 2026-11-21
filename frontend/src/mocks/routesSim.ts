@@ -2,7 +2,7 @@
 import type { PolicyName, PsiSettings, SimulationConfig } from '@/api/types';
 import { DEFAULT_HINDSIGHT, DEFAULT_PSI, PSI_FEATURES } from '@/lib/domain';
 import { epochRange } from '@/lib/epoch';
-import { paginate, renderReview, renderSim } from './render';
+import { jobState, paginate, renderReview, renderSim } from './render';
 import { latestPortfolio, readyFit } from './routesData';
 import { banditDetails, counterfactualDetails } from './reportDetails';
 import type { Route } from './router';
@@ -58,7 +58,10 @@ function createSimulation(raw: unknown, now: number) {
   const b = body(raw);
   const e = new Errors();
   const fitId = num(b.fit);
-  e.check(fitId !== null, 'fit', 'This field is required.');
+  const coldStart = b.cold_start === true;
+  const datasetId = num(b.dataset);
+  e.check(fitId !== null || coldStart, 'fit', 'A fit is required unless cold_start is true (then a dataset is enough).');
+  e.check(fitId !== null || datasetId !== null, 'dataset', 'A cold start without a fit needs a dataset.');
   const name = str(b.name)?.trim() ?? '';
   e.check(name.length > 0, 'name', 'This field is required.');
   const rawPolicies = Array.isArray(b.policies) ? b.policies : [];
@@ -66,7 +69,14 @@ function createSimulation(raw: unknown, now: number) {
   e.check(policies.length > 0 && policies.every((p) => p !== null), 'policies', `Each policy must be one of ${POLICY_KINDS.join(', ')}, optionally with BanditConfig overrides, e.g. ucb1(ucb_c=1.0).`);
   e.check(new Set(policies).size === policies.length, 'policies', 'duplicate policies in the run');
   e.throwIfAny();
-  const fit = readyFit(fitId!, now);
+  // a fit-less cold start borrows the dataset's newest ready fit as the mock's replay world
+  const fit =
+    fitId !== null
+      ? readyFit(fitId, now)
+      : ([...db.fits.values()].filter((f) => f.datasetId === datasetId && jobState(db.jobs.get(f.jobId)!, now).status === 'succeeded').sort((a, b) => b.id - a.id)[0] ??
+        badRequest('dataset', 'Mock mode simulates the replay world from a ready fit of this dataset; train one first.'));
+  e.check(fitId === null || datasetId === null || datasetId === fit.datasetId, 'dataset', `fit ${fit.id} was trained on dataset ${fit.datasetId}; omit dataset or match it`);
+  e.throwIfAny();
   const ds = db.datasets.get(fit.datasetId)!;
   const start = str(b.start) ?? '2015-01';
   const end = str(b.end) ?? '2018-12';
@@ -107,12 +117,15 @@ function createSimulation(raw: unknown, now: number) {
     breaker_mode: bm as SimulationConfig['breaker_mode'],
     checkpoint_every: every,
     hindsight_sample: hs as SimulationConfig['hindsight_sample'],
+    cold_start: coldStart,
   };
   const id = db.next.sim++;
   const sim: SimRec = {
     id,
     name,
     fitId: fit.id,
+    datasetId: fit.datasetId,
+    hasFit: fitId !== null,
     config,
     createdMs: now,
     jobId: newJob('simulation', { type: 'simulation', id }, now + 700, 0).id,
@@ -252,7 +265,7 @@ function report(sim: SimRec, now: number) {
   }
   return buildReport({
     simulation: sim.id,
-    fit: fit.id,
+    fit: sim.hasFit ? fit.id : null,
     dataset: ds.id,
     final: sim.status === 'completed',
     metrics,
@@ -272,11 +285,11 @@ function report(sim: SimRec, now: number) {
       failed_workloads: sim.restarts,
       recovery_seconds: sim.lastRecovery?.recovery_seconds ?? null,
     },
-    fitConfig: fit.config,
+    fitConfig: sim.hasFit ? fit.config : null,
     simConfig: sim.config,
     generatedAt: iso(now),
     topShare,
-    details: { bandit_performance: banditDetails(v), counterfactual_evaluation: counterfactualDetails(latestPortfolio(fit.id, now), metrics) },
+    details: { bandit_performance: banditDetails(v), counterfactual_evaluation: counterfactualDetails(sim.hasFit ? latestPortfolio(fit.id, now) : null, metrics) },
   });
 }
 
@@ -286,7 +299,10 @@ export const simRoutes: Route[] = [
     /^\/simulations\/$/,
     (_m, q, _b, now) => {
       const fit = q.get('fit');
-      const sims = [...db.sims.values()].filter((s) => !fit || s.fitId === Number(fit)).sort((a, b) => b.id - a.id);
+      const dataset = q.get('dataset');
+      const sims = [...db.sims.values()]
+        .filter((s) => (!fit || (s.hasFit && s.fitId === Number(fit))) && (!dataset || s.datasetId === Number(dataset)))
+        .sort((a, b) => b.id - a.id);
       return paginate('/simulations/', sims.map((s) => renderSim(s, now)), q);
     },
   ],

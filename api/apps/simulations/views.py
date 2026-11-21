@@ -28,7 +28,7 @@ EMPTY_BODY = inline_serializer("EmptyBody", fields={})
     list=extend_schema(
         summary="List simulations (newest first)",
         tags=TAG,
-        parameters=[OpenApiParameter("fit", OpenApiTypes.INT)],
+        parameters=[OpenApiParameter("fit", OpenApiTypes.INT), OpenApiParameter("dataset", OpenApiTypes.INT)],
         responses=SimulationSerializer(many=True),
     ),
     retrieve=extend_schema(
@@ -46,9 +46,9 @@ EMPTY_BODY = inline_serializer("EmptyBody", fields={})
 class SimulationViewSet(
     mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
 ):
-    queryset = Simulation.objects.select_related("fit", "fit__dataset", "job").order_by("-id")
+    queryset = Simulation.objects.select_related("fit", "fit__dataset", "dataset", "job").order_by("-id")
     serializer_class = SimulationSerializer
-    filterset_fields = ["fit", "status"]
+    filterset_fields = ["fit", "dataset", "status"]
 
     def get_serializer_class(self):
         return SimulationCreateSerializer if self.action == "create" else SimulationSerializer
@@ -67,8 +67,14 @@ class SimulationViewSet(
     def create(self, request, *args, **kwargs):
         ser = SimulationCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        fit = require_ready(ser.validated_data["fit_obj"])
-        sim = services.create_simulation(fit, ser.validated_data["name"], ser.validated_data["config"])
+        data = ser.validated_data
+        fit = require_ready(data["fit_obj"]) if data["fit_obj"] is not None else None
+        ds = data["dataset_obj"]
+        if fit is None and not ds.is_ready:
+            raise Conflict(f"dataset {ds.pk} is not ready (status {ds.current_status})")
+        sim = services.create_simulation(
+            fit, data["name"], data["config"], dataset=ds, framework=data["framework"]
+        )
         return Response(services.simulation_payload(sim), status=status.HTTP_201_CREATED)
 
     def _sim(self) -> Simulation:

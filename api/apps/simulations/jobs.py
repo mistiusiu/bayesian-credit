@@ -28,7 +28,7 @@ POLL_INTERVAL = 0.5
 
 
 def run_simulation(job: Job, reporter: ProgressReporter) -> None:
-    sim = Simulation.objects.select_related("fit", "fit__dataset").get(pk=job.target_id)
+    sim = Simulation.objects.select_related("fit", "fit__dataset", "dataset").get(pk=job.target_id)
     mode = (job.params or {}).get("mode", "run")
     inline = job.pid is None
     rd = RunDirectory(sim.directory)
@@ -48,12 +48,22 @@ def run_simulation(job: Job, reporter: ProgressReporter) -> None:
     else:
         framework = FrameworkConfig.from_dict(conf["framework"])
         sim_cfg = SimulationConfig.from_dict(conf["simulation"])
-        reporter.log(f"loading dataset #{sim.fit.dataset_id} and fit #{sim.fit_id}", 0.0)
-        df = load_dataset(sim.fit.dataset.parquet)
-        fitted = load_fitted(sim.fit)
+        ds = sim.source_dataset
+        if sim.fit_id:
+            reporter.log(f"loading dataset #{ds.pk} and fit #{sim.fit_id}", 0.0)
+            fitted = load_fitted(sim.fit)
+        else:
+            reporter.log(
+                f"loading dataset #{ds.pk}; no fit - the replay world is fitted on loans issued before "
+                f"{sim_cfg.start[:7]}",
+                0.0,
+            )
+            fitted = None
+        df = load_dataset(ds.parquet)
         reporter.log(
             f"running {len(sim_cfg.policies)} policies over {sim_cfg.start[:7]}..{sim_cfg.end[:7]} "
-            f"(max_loans={sim_cfg.max_loans}, feedback={sim_cfg.feedback_mode.value}, breaker={sim_cfg.breaker_mode})",
+            f"(max_loans={sim_cfg.max_loans}, feedback={sim_cfg.feedback_mode.value}, breaker={sim_cfg.breaker_mode}"
+            f"{', cold start: flat priors, no risk-model warm start' if sim_cfg.cold_start else ''})",
             0.01,
         )
         result = pipeline_run_simulation(
@@ -62,9 +72,9 @@ def run_simulation(job: Job, reporter: ProgressReporter) -> None:
             sim_cfg,
             rd.path,
             cfg=framework,
-            dataset_path=str(sim.fit.dataset.parquet),
+            dataset_path=str(ds.parquet),
             dataset_info=conf.get("dataset") or {},
-            fit_dir=str(sim.fit.directory),
+            fit_dir=str(sim.fit.directory) if sim.fit_id else None,
             **common,
         )
     reporter.log(

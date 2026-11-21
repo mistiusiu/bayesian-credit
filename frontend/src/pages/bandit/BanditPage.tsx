@@ -26,11 +26,12 @@ export function BanditPage() {
       <SimulationForm
         fitId={sel.fit?.status === 'ready' ? sel.fitId : null}
         excluded={sel.dataset?.params.exclude_variables ?? []}
+        datasetId={sel.dataset?.status === 'ready' ? sel.datasetId : null}
         datasetLoans={sel.dataset?.n_loans ?? null}
         onCreated={(s) => sel.setSim(s.id)}
       />
       <div className="mt-4">
-        <Card title="Runs" subtitle={sel.fit ? `with fit #${sel.fit.id} ${sel.fit.name}` : undefined} bodyClassName="p-0">
+        <Card title="Runs" subtitle={sel.fit ? `with fit #${sel.fit.id} ${sel.fit.name}, plus the dataset's fit-less cold starts` : sel.dataset ? `cold starts on dataset #${sel.dataset.id} (no fit yet)` : undefined} bodyClassName="p-0">
           <RunsTable sims={sel.sims} selectedId={sel.simId} onSelect={sel.setSim} />
         </Card>
       </div>

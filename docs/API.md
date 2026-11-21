@@ -742,15 +742,23 @@ Each sampled borrower gets exactly one class, first match in this order:
 
 ### 8.1 `POST /simulations/` → 201 `Simulation`
 
-`fit` must be `ready` (409). Omitted fields take these defaults
-(`SimulationConfig` / `PSIConfig` in `core/bayesian_credit/config.py`):
+A warm run names a `fit`, which must be `ready` (409). A **cold start** (`cold_start: true`,
+docs/SIMULATION.md §11) runs the policies without an offline model. It can name a `fit` to
+reuse that fit's replay world, or only a `dataset` (which must be `ready`, else 409). In that
+case no fit is needed: the defaults of `FrameworkConfig` apply (with the dataset's snapshot and
+variable selection), and the worker fits the replay world's reference on the loans issued
+before `start` into `<run_dir>/fit`. Omitted fields take these defaults (`SimulationConfig` /
+`PSIConfig` in `core/bayesian_credit/config.py`):
 
 | Field | Default | Validation / meaning |
 |---|---|---|
-| `fit`, `name` | — | required |
+| `name` | — | required |
+| `fit` | — | required unless `cold_start` (400 `fit`) |
+| `dataset` ★ | — | cold start without a fit: the dataset to replay (400 `dataset` when missing / unknown, or when it differs from the fit's) |
+| `cold_start` ★ | `false` | policies start from the flat prior N(`prior_mu`, `prior_sigma`²) with no risk-model warm start |
 | `policies` | — | required, ≥ 1 distinct `PolicyName` |
 | `feedback_mode` | `"simulated"` | `simulated` (posterior-predictive environment) · `replay` (rejection sampling: update only when arm == historical) · `hybrid` |
-| `start` / `end` | `"2015-01"` / `"2018-12"` | inclusive epochs inside the dataset range |
+| `start` / `end` | the fit's `train_end` (cold start without a fit: `"2015-01"`) / the dataset's last epoch | inclusive epochs inside the dataset range; `start` must leave a reference window |
 | `max_loans` | `50000` | borrowers sampled from the stream with `seed`; `null` = all |
 | `seed` | `42` | |
 | `interim_months` | `12` | months of interim feedback per loan |
@@ -777,10 +785,22 @@ Each sampled borrower gets exactly one class, first match in this order:
   "breaker_mode": "pause", "checkpoint_every": 6 }
 ```
 
-### 8.2 `GET /simulations/?fit=` · `GET /simulations/{id}/` → `Simulation`
+Cold start without a fit:
+
+```json
+{ "dataset": 2, "cold_start": true, "name": "Cold start · greedy vs explorers",
+  "policies": ["greedy", "thompson", "ucb1", "epsilon_greedy", "historical"], "breaker_mode": "off" }
+```
+
+### 8.2 `GET /simulations/?fit=&dataset=` · `GET /simulations/{id}/` → `Simulation`
+
+`?dataset=` lists every run on the dataset, including fit-less cold starts.
 
 | Field | Meaning |
 |---|---|
+| `fit`, `fit_name` | the run's fit; `null` for a cold start without one |
+| `dataset`, `dataset_name` | the replayed dataset |
+| `cold_start` | the policies ran without an offline model (= `config.cold_start`) |
 | `status`, `progress` | `SimulationStatus`; `progress = epochs_done / epochs_total` |
 | `config` | fully resolved `SimulationConfig` |
 | `current_epoch` | last **completed** epoch (null before the first) |

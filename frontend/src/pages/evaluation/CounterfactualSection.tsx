@@ -85,16 +85,24 @@ export function CounterfactualSection({ report }: { report: EvaluationReport }) 
           {b.mix && <RecommendationMixPanel mix={b.mix} />}
           {b.eligibility && <EligibilitySummary e={b.eligibility} nLendingArms={nLending} />}
         </>
+      ) : report.fit === null ? (
+        <p className="rounded-lg border border-line bg-surface px-4 py-3 text-xs text-muted">
+          This run is a cold start without a fit: there is no trained risk model, so there is no offline shadow portfolio to compare against. Its counterfactual evidence is the bandit dimension above, where every policy learned online from a flat prior.
+        </p>
       ) : (
         <p className="rounded-lg border border-line bg-surface px-4 py-3 text-xs text-muted">
           The report has no shadow portfolio summary ({cf?.note ?? 'block absent'}) and fit #{report.fit} has no finished portfolio evaluation: run one on the Shadow engine page (Portfolio tab).
         </p>
       )}
-      <SectionTitle>Risk-model extras · fit #{report.fit}</SectionTitle>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <PolicyEffectCard pe={fit?.metrics?.policy_effect} />
-        <InterestRealizationCard ir={realization} />
-      </div>
+      {report.fit !== null && (
+        <>
+          <SectionTitle>Risk-model extras · fit #{report.fit}</SectionTitle>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <PolicyEffectCard pe={fit?.metrics?.policy_effect} />
+            <InterestRealizationCard ir={realization} />
+          </div>
+        </>
+      )}
     </section>
   );
 }

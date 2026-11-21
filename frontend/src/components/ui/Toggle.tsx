@@ -1,12 +1,25 @@
 import { cn } from '@/lib/cn';
 
-export function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description?: string }) {
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+}) {
   return (
-    <label className="inline-flex cursor-pointer items-start gap-2.5 select-none">
+    <label className={cn('inline-flex items-start gap-2.5 select-none', disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer')}>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn('relative mt-0.5 h-4.5 w-8 shrink-0 rounded-full border transition-colors', checked ? 'border-accent bg-accent' : 'border-line-strong bg-surface-3')}
       >

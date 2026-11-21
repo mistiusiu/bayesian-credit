@@ -7,6 +7,7 @@ Examples
     python scripts/run_pipeline.py --source synthetic                       # 200k synthetic loans (with a 2016-06 shift)
     python scripts/run_pipeline.py --source synthetic --n 50000 --max-loans 10000 --no-shift
     python scripts/run_pipeline.py --source lending_club --max-rows 300000 --max-loans 50000
+    python scripts/run_pipeline.py --source lending_club --cold-start --policies greedy,thompson,epsilon_greedy,ucb1,historical
 
 Outputs (``--out``, default ``data/runs/<timestamp>``)::
 
@@ -63,6 +64,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     help="action applied by auto_ack (default: PSIConfig.auto_action = resume)")
     ap.add_argument("--interim-months", type=int, default=None, help="default: SimulationConfig.interim_months (12)")
     ap.add_argument("--checkpoint-every", type=int, default=None, help="default: SimulationConfig.checkpoint_every (6)")
+    ap.add_argument("--cold-start", action="store_true",
+                    help="policies start from a flat prior with no risk-model warm start (no offline model); "
+                         "the fit still builds the replay world and the shadow portfolio")
     ap.add_argument("--risk-aversion", type=float, default=None, help="λ in mean − λ·std (default: RewardConfig, 0)")
     ap.add_argument("--shadow-max-loans", type=int, default=200_000, help="holdout loans scored by the shadow engine")
     ap.add_argument("--no-shift", action="store_true", help="synthetic: no distribution shift")
@@ -338,6 +342,7 @@ def main(argv: list[str] | None = None) -> int:
         "feedback_mode": args.feedback_mode,
         "policies": tuple(p.strip() for p in args.policies.split(",") if p.strip()),
         "breaker_mode": args.breaker_mode,
+        "cold_start": bool(args.cold_start),
     }
     if args.interim_months is not None:
         sim_kwargs["interim_months"] = args.interim_months

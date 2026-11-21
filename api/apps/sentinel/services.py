@@ -36,8 +36,7 @@ def _segmentation_before(sim: Simulation, rec: dict[str, Any]) -> list[str]:
         dims = rec.get(key)
         if isinstance(dims, list) and dims:
             return [str(d) for d in dims]
-    fit_cfg = (sim.fit.config or {}).get("segmentation") or {}
-    return list(fit_cfg.get("dimensions") or [])
+    return sim.segmentation_dimensions
 
 
 def _refined(dims: list[str]) -> list[str] | None:
