@@ -193,7 +193,7 @@ STATUS_DEFAULTED = frozenset(
     {"Charged Off", "Default", "Does not meet the credit policy. Status:Charged Off"}
 )
 STATUS_DELINQUENT = frozenset({"In Grace Period", "Late (16-30 days)", "Late (31-120 days)"})
-STATUS_CURRENT = frozenset({"Current"})
+STATUS_CURRENT = frozenset({"Current", "Issued"})  # "Issued": funded, first payment not yet due (2020Q3 export)
 STATUS_RESOLVED = STATUS_FULLY_PAID | STATUS_DEFAULTED
 STATUS_UNRESOLVED = STATUS_DELINQUENT | STATUS_CURRENT
 

@@ -55,13 +55,37 @@ and dtypes; columns that are already canonical are not copied.
 
 ## 2. Lending Club loader (`LendingClubLoader`)
 
-**Source.** Kaggle dataset `wordsforthewise/lending-club` (CC0), file
-`accepted_2007_to_2018Q4.csv.gz`: 374 MB gzipped, 2,260,701 rows, 151 columns.
-`scripts/download_data.sh` fetches it into `data/raw/` with the Kaggle CLI. It uses
-`$KAGGLE_API_TOKEN`, or `~/.kaggle/access_token`, without printing the token. Supports
-`--force` and `--dry-run`. The default path is `$LENDING_CLUB_CSV` or
-`<repo>/data/raw/accepted_2007_to_2018Q4.csv.gz`. A missing file raises
-`DataSourceError`, and the message points to the script.
+**Source.** Two Kaggle exports are supported; the newer one is the default.
+
+| | default | legacy (`--legacy`) |
+|---|---|---|
+| Kaggle dataset | `ethon0426/lending-club-20072020q1` | `wordsforthewise/lending-club` (CC0) |
+| file in `data/raw/` | `Loan_status_2007-2020Q3.csv` (Kaggle calls it `Loan_status_2007-2020Q3.gzip`; it is a plain CSV) | `accepted_2007_to_2018Q4.csv.gz` |
+| size | 1.8 GB CSV (505 MB zipped download) | 374 MB gzipped |
+| rows × columns | 2,925,493 × 142 (a leading unnamed row index, ignored) | 2,260,701 × 151 |
+| issue months | 2007‑06 .. 2020‑09 | 2007‑06 .. 2018‑12 |
+| snapshot (statuses observed) | **2020‑10‑31** | **2019‑03‑31** |
+
+The newer export carries 18 more months of repayment history. That resolves far more of
+the 2016–2018 vintages (2017: 71% resolved), which is what the risk model, the hindsight
+yardstick and the replay feedback all learn from. It also adds 2019–2020 originations and one
+new status, `Issued` (funded, first payment not yet due), which is treated as `Current`.
+
+`scripts/download_data.sh` fetches the default file into `data/raw/` (`--legacy` for the
+older one). It uses `$KAGGLE_API_TOKEN` or `~/.kaggle/access_token` without printing the
+token. It uses the Kaggle CLI when installed and otherwise calls the Kaggle API with curl.
+Supports `--force` and `--dry-run`. The default path is `$LENDING_CLUB_CSV`, else
+`<repo>/data/raw/Loan_status_2007-2020Q3.csv`, else the legacy file when only that one is
+present. A missing file raises `DataSourceError`, and the message points to the script.
+
+**Snapshot date.** Censoring depends on the day the statuses were observed, and that day
+differs per file. `LendingClubLoader.snapshot_date` returns the file's own snapshot. Known
+files use `KNOWN_SOURCES`; any other file uses the month end of its latest `last_pymnt_d`.
+`load_loans("lending_club", ...)` derives outcomes with it (`snapshot=` overrides) and
+records it as `df.attrs["snapshot_date"]`. `prepare_dataset` returns it as
+`summary["snapshot_date"]`. The API stores it in the dataset summary, and every fit of that
+dataset inherits it as `framework.data.snapshot_date`. `DataConfig.snapshot_date`
+(2019‑03‑31) remains the default for synthetic data.
 
 **Parsing.** All parsing happens in one DuckDB `SELECT` over
 `read_csv(path, all_varchar=true, header=true, sample_size=20000)`. Every value is
@@ -350,7 +374,18 @@ aliases are `generate_table`, module‑level `generate(n, seed, **kw)`, and
   cohorts this mass is what matters, and Beta(1, 2.5) with the 45% share fits the cohort
   table best: share 0.55–0.65 or a flatter Beta pushes 2016–18 down to 11–20%.
 
-## 6. Real‑data facts (profiled on the Kaggle file)
+## 6. Real‑data facts (profiled on the Kaggle files)
+
+**2007–2020Q3 export (default).** 2,925,493 rows × 142 columns, all with a unique `id`.
+`issue_d` runs from 2007‑06 to 2020‑09. `last_pymnt_d` / `last_credit_pull_d` reach 2020‑10
+(most `Current` loans were last refreshed in May–June 2020). Loans per year: 2015 421k,
+2016 434k, 2017 444k, 2018 495k, 2019 518k, 2020 147k. Status counts: Fully Paid 1,497,783,
+Current 1,031,016, Charged Off 362,548, Late (31‑120) 16,154, In Grace Period 10,028,
+Late (16‑30) 2,719, Issued 2,062, policy‑exception Fully Paid 1,988 / Charged Off 761,
+Default 433. Share resolved by issue year: 2015 96%, 2016 93%, 2017 71%, 2018 40%, 2019 15%.
+On a 300k random subset: 63.6% resolved, default rate among resolved 19.7%.
+
+**2007–2018Q4 export (legacy).**
 
 - 2,260,701 rows × 151 columns; the last 33 rows are all NULL. `policy_code` is always 1.0.
 - `issue_d` runs from 2007‑06 to 2018‑12; `last_pymnt_d` max is 2019‑03, hence the

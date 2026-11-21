@@ -49,7 +49,7 @@ web: ## Run the Vite dev server on :5173 against the live API on :$(API_PORT)
 synthetic: ## Generate a 200k-loan synthetic Lending Club twin
 	$(PY) scripts/make_synthetic.py --n 200000 --seed 7 --out data/processed/synthetic.parquet
 
-data: ## Download the Lending Club accepted-loans file from Kaggle (needs ~/.kaggle/access_token)
+data: ## Download the Lending Club 2007-2020Q3 loan file from Kaggle (needs ~/.kaggle/access_token)
 	bash scripts/download_data.sh
 
 pipeline: ## End-to-end: ingest → fit → shadow portfolio → simulation → report (synthetic)

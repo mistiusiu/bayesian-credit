@@ -1,7 +1,22 @@
 """Lending Club loader: Kaggle CSV(.gz) -> canonical ``LoanTable`` (SPEC §1.2-§1.3, Appendix F).
 
-The whole projection / parsing step runs inside DuckDB SQL, so the 1.6 GB (374 MB gzipped)
-Kaggle export is never materialised as 151 string columns in pandas:
+Two Kaggle exports are supported (:data:`KNOWN_SOURCES`); the default is the newer one:
+
+* ``ethon0426/lending-club-20072020q1`` - ``Loan_status_2007-2020Q3.csv`` (1.8 GB CSV,
+  2,925,493 loans issued 2007-06 .. 2020-09, 142 columns, observed to 2020-10). Kaggle ships
+  it as ``Loan_status_2007-2020Q3.gzip``, which is a *plain* CSV despite the name;
+  ``scripts/download_data.sh`` stores it as ``.csv``. Its extra 18 months of repayment
+  history resolve far more of the 2016-2018 vintages than the older export;
+* ``wordsforthewise/lending-club`` - ``accepted_2007_to_2018Q4.csv.gz`` (374 MB gzipped,
+  2,260,701 loans issued to 2018-12, observed to 2019-03), the original source.
+
+The snapshot date (the day the file's loan statuses were observed) differs per file; it
+drives censoring in the outcome derivation, so :attr:`LendingClubLoader.snapshot_date`
+returns the file's own snapshot (known files, else the month end of the latest
+``last_pymnt_d``) and :func:`bayesian_credit.data.load_loans` derives outcomes with it.
+
+The whole projection / parsing step runs inside DuckDB SQL, so the Kaggle export is never
+materialised as ~150 string columns in pandas:
 
 * **data minimisation (F.4)** - only the Table 3 retained variables plus the row key
   ``loan_id`` (LC ``id``) are ever selected; free text, URLs, zip/state, member_id are not
@@ -55,9 +70,30 @@ from .schema import (
 #: Bump when the parsing rules change so stale parquet caches are rebuilt.
 LOADER_VERSION = 3
 
-#: File name of the Kaggle export (dataset ``wordsforthewise/lending-club``, CC0).
-DEFAULT_FILENAME = "accepted_2007_to_2018Q4.csv.gz"
-KAGGLE_DATASET = "wordsforthewise/lending-club"
+#: File name of the default Kaggle export (dataset ``ethon0426/lending-club-20072020q1``).
+DEFAULT_FILENAME = "Loan_status_2007-2020Q3.csv"
+KAGGLE_DATASET = "ethon0426/lending-club-20072020q1"
+#: The original export (dataset ``wordsforthewise/lending-club``, CC0), used when the
+#: default file is absent.
+LEGACY_FILENAME = "accepted_2007_to_2018Q4.csv.gz"
+LEGACY_KAGGLE_DATASET = "wordsforthewise/lending-club"
+
+#: Facts about the known Kaggle exports, by file name: Kaggle dataset, snapshot date (the
+#: day loan statuses were observed) and the issue-month range.
+KNOWN_SOURCES: dict[str, dict[str, str]] = {
+    DEFAULT_FILENAME: {
+        "dataset": KAGGLE_DATASET,
+        "snapshot_date": "2020-10-31",  # last_pymnt_d / last_credit_pull_d run to 2020-10
+        "issue_min": "2007-06",
+        "issue_max": "2020-09",
+    },
+    LEGACY_FILENAME: {
+        "dataset": LEGACY_KAGGLE_DATASET,
+        "snapshot_date": "2019-03-31",  # issue_d ends 2018-12, last_pymnt_d runs to 2019-03
+        "issue_min": "2007-06",
+        "issue_max": "2018-12",
+    },
+}
 
 #: Column order of a canonical LoanTable: the row key, then Table 3 in proposal order.
 CANONICAL_COLUMNS: tuple[str, ...] = (ID_COLUMN, *ALL_RETAINED_COLUMNS)
@@ -270,15 +306,17 @@ def subsample(df: pd.DataFrame, fraction: float, seed: int = 42) -> pd.DataFrame
 
 
 def default_lending_club_path() -> Path:
-    """``$LENDING_CLUB_CSV`` or ``<repo>/data/raw/accepted_2007_to_2018Q4.csv.gz``."""
+    """``$LENDING_CLUB_CSV``, else ``<repo>/data/raw/Loan_status_2007-2020Q3.csv``, else the
+    legacy ``accepted_2007_to_2018Q4.csv.gz`` when only that one was downloaded."""
     env = os.environ.get("LENDING_CLUB_CSV")
     if env:
         return Path(env).expanduser()
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "data" / "raw" / DEFAULT_FILENAME
-        if candidate.exists():
-            return candidate
+        for name in (DEFAULT_FILENAME, LEGACY_FILENAME):
+            candidate = parent / "data" / "raw" / name
+            if candidate.exists():
+                return candidate
     repo_guess = here.parents[3] if len(here.parents) > 3 else Path.cwd()
     if (repo_guess / "data").is_dir():
         return repo_guess / "data" / "raw" / DEFAULT_FILENAME
@@ -341,14 +379,53 @@ class LendingClubLoader:
         self.last_query: str | None = None
         self.last_load_seconds: float | None = None
         self.last_source: str | None = None
+        self._snapshot: str | None = None
 
     # ----- file / header ------------------------------------------------------------
+    @property
+    def known_source(self) -> dict[str, str] | None:
+        """:data:`KNOWN_SOURCES` entry of this file (``None`` for an unknown export)."""
+        return KNOWN_SOURCES.get(self.path.name)
+
+    @property
+    def snapshot_date(self) -> str:
+        """The day this file's loan statuses were observed (``YYYY-MM-DD``).
+
+        Known exports use :data:`KNOWN_SOURCES`; any other file uses the month end of its
+        latest ``last_pymnt_d`` (falling back to ``data_cfg.snapshot_date``). Cached.
+        """
+        if self._snapshot is None:
+            known = self.known_source
+            self._snapshot = known["snapshot_date"] if known else self.infer_snapshot()
+        return self._snapshot
+
+    def infer_snapshot(self) -> str:
+        """Month end of the latest ``last_pymnt_d`` (from the parquet cache when fresh)."""
+        self._require_file()
+        con = self._connect()
+        try:
+            if self.cache_is_fresh():
+                row = con.execute(
+                    "SELECT max(last_pymnt_d) FROM read_parquet($p)", {"p": str(self.cache_path)}
+                ).fetchone()
+            else:
+                expr = self.column_expression("last_pymnt_d", self.column_mapping().get("last_pymnt_d"))
+                row = con.execute(f"SELECT max({expr}) FROM {self._csv_source()}", {"path": str(self.path)}).fetchone()
+        except duckdb.Error:
+            row = None
+        finally:
+            con.close()
+        latest = row[0] if row else None
+        if latest is None or pd.isna(latest):
+            return str(self.data_cfg.snapshot_date)
+        return (pd.Timestamp(latest) + pd.offsets.MonthEnd(0)).date().isoformat()
+
     def _require_file(self) -> None:
         if not self.path.is_file():
             raise DataSourceError(
                 f"Lending Club file not found: {self.path}. Download it with "
                 f"`scripts/download_data.sh` (Kaggle dataset {KAGGLE_DATASET}, file "
-                f"{DEFAULT_FILENAME}) or pass path=... / set $LENDING_CLUB_CSV. "
+                f"{DEFAULT_FILENAME}; --legacy for {LEGACY_FILENAME}) or pass path=... / set $LENDING_CLUB_CSV. "
                 "Use source='synthetic' to run without it."
             )
 
@@ -511,7 +588,7 @@ class LendingClubLoader:
 
         ``order`` decides which rows ``max_rows`` keeps: ``"issue_d"`` (default) sorts by
         ``(issue_d, loan_id)`` and so returns the *earliest* loans - the ones most likely to
-        be resolved by the 2019-03 snapshot, but concentrated in 2007-2013 (the first 200k
+        be resolved by the snapshot, but concentrated in 2007-2013 (the first 200k
         loans end around late 2013). ``"random"`` orders by the seeded MD5 hash (a
         reproducible random subset over all years); ``"file"`` keeps file order and stops
         reading as soon as ``max_rows`` rows qualify (fastest, never builds the cache).
@@ -661,6 +738,8 @@ class LendingClubLoader:
         info: dict[str, Any] = {
             "path": str(self.path),
             "exists": self.path.is_file(),
+            "kaggle_dataset": (self.known_source or {}).get("dataset"),
+            "snapshot_date": (self.known_source or {}).get("snapshot_date"),
             "size_bytes": None,
             "n_source_columns": None,
             "retained_present": {},

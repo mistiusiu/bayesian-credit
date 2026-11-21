@@ -62,7 +62,8 @@ function createDataset(raw: unknown, now: number) {
   const from = (str(b.issue_from) ?? '2012-01');
   const to = (str(b.issue_to) ?? '2018-12');
   e.check(from <= to, 'issue_to', 'Must not precede issue_from.');
-  e.check(from >= '2007-06' && to <= '2018-12', 'issue_from', 'Lending Club issue dates span 2007-06 to 2018-12.');
+  if (source === 'lending_club') e.check(from >= '2007-06' && to <= '2020-09', 'issue_from', 'Lending Club issue dates in Loan_status_2007-2020Q3.csv span 2007-06 to 2020-09.');
+  else e.check(to <= '2019-03', 'issue_to', 'Synthetic loans cannot be issued after the 2019-03 snapshot.');
   let shift: DatasetCreate['shift'] = null;
   if (isObj(b.shift) && source === 'synthetic') {
     const at = str(b.shift.at);
@@ -81,7 +82,7 @@ function createDataset(raw: unknown, now: number) {
   const params: DatasetCreate = {
     name,
     source: source as DatasetCreate['source'],
-    path: source === 'lending_club' ? str(b.path) ?? 'data/raw/accepted_2007_to_2018Q4.csv.gz' : null,
+    path: source === 'lending_club' ? str(b.path) ?? 'data/raw/Loan_status_2007-2020Q3.csv' : null,
     n: source === 'synthetic' ? n : null,
     seed: num(b.seed) ?? 42,
     max_rows: source === 'lending_club' ? maxRows : null,

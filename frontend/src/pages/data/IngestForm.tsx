@@ -11,7 +11,8 @@ import { ablationTags, matchingPreset } from '@/lib/variables';
 import { VariablePicker } from './VariablePicker';
 
 /** Lending Club accepted file: issue dates and size of the whole file. */
-const LC_SPAN = { from: '2007-06', to: '2018-12', rows: 2_260_701 };
+/** Kaggle ethon0426/lending-club-20072020q1 (Loan_status_2007-2020Q3.csv), observed 2020-10. */
+const LC_SPAN = { from: '2007-06', to: '2020-09', rows: 2_925_493 };
 
 interface State {
   source: DataSource;
@@ -142,7 +143,7 @@ export function IngestForm({ onCreated, template = null }: { onCreated: (d: Data
           ) : (
             <>
               <Field label="Path" hint="default: server ARTIFACT data/raw" error={errs.path}>
-                {(id, d) => <TextInput id={id} aria-describedby={d} value={s.path} placeholder="accepted_2007_to_2018Q4.csv.gz" onChange={(e) => set('path', e.target.value)} />}
+                {(id, d) => <TextInput id={id} aria-describedby={d} value={s.path} placeholder="Loan_status_2007-2020Q3.csv" onChange={(e) => set('path', e.target.value)} />}
               </Field>
               <Field label="Max rows" hint={s.wholeFile ? 'whole file' : 'seeded random subset'} error={errs.max_rows}>
                 {(id, d, inv) => <NumberInput id={id} aria-describedby={d} aria-invalid={inv} min={1000} step={1000} disabled={s.wholeFile} value={s.wholeFile ? null : s.maxRows} onValue={(v) => set('maxRows', v)} />}
@@ -168,7 +169,7 @@ export function IngestForm({ onCreated, template = null }: { onCreated: (d: Data
               checked={s.wholeFile}
               onChange={(v) => setS((p) => ({ ...p, wholeFile: v, ...(v ? { from: LC_SPAN.from, to: LC_SPAN.to } : {}) }))}
               label="Entire dataset"
-              description={`Every accepted loan in the issue window (the whole file spans ${LC_SPAN.from} – ${LC_SPAN.to}, about ${fmt.compact(LC_SPAN.rows)} loans) instead of a pilot subset. Ingest takes a few minutes; simulations can still sample from it.`}
+              description={`Every accepted loan in the issue window (the whole file spans ${LC_SPAN.from} – ${LC_SPAN.to}, about ${fmt.compact(LC_SPAN.rows)} loans) instead of a pilot subset. Loans issued in 2019–2020 are mostly still open at the 2020-10 snapshot. Ingest takes a few minutes; simulations can still sample from it.`}
             />
           </div>
         )}

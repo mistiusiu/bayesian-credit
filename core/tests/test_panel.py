@@ -179,7 +179,7 @@ class TestStatusRules:
                 (17, "Late (31-120 days)", "2016-01-01", "2018-09-01", 36, 0.0),  # 6 months behind -> capped
                 (18, "Fully Paid", "2015-01-01", "2018-06-01", 36, 0.0),  # paid after term -> capped
                 (19, "Current", "2018-12-01", None, 36, 0.0),  # no payment yet
-                (20, "Issued", "2019-03-01", None, 36, 0.0),  # unknown status -> skipped
+                (20, "Withdrawn", "2019-03-01", None, 36, 0.0),  # unknown status -> skipped
             ]
         )
         panel = LoanStatePanel.from_table(table, PROPOSAL, SNAP, keep_paths=True)

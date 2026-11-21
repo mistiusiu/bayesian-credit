@@ -21,6 +21,7 @@ transparency), plus a per-vintage breakdown.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import resource
@@ -159,6 +160,9 @@ def prepare_dataset(
     ``max_rows``, ``sample_fraction``, ``issue_from``, ``order`` ...). For the real file a
     ``max_rows`` subset defaults to ``order="random"`` (the loader's ``"issue_d"`` default
     would keep only the earliest loans and leave the 2015+ stream empty).
+
+    The summary's ``snapshot_date`` is the one the outcomes were derived with (the real
+    file's own snapshot); fit with ``cfg.data.snapshot_date`` set to it.
     """
     cfg = cfg or FrameworkConfig()
     t0 = time.perf_counter()
@@ -174,11 +178,13 @@ def prepare_dataset(
         data_cfg=cfg.data,
         **kw,
     )
+    snapshot = str(df.attrs.get("snapshot_date") or cfg.data.snapshot_date)
     df = apply_variable_selection(df, exclude_variables, cfg)
-    summary = summarize(df, cfg.data)
+    summary = summarize(df, dataclasses.replace(cfg.data, snapshot_date=snapshot))
     summary.update(
         {
             "source": source,
+            "snapshot_date": snapshot,
             "params": jsonable(kw),
             "exclude_variables": list(exclude_variables or ()),
             "n_columns": int(df.shape[1]),

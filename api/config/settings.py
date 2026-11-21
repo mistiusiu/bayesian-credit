@@ -13,7 +13,7 @@ Everything deployment-specific comes from the environment (12-factor):
 ``DATA_ROOT``            data directory (default ``<repo>/data``)
 ``ARTIFACT_ROOT``        datasets, fits, simulation run dirs, job logs
                          (default ``<DATA_ROOT>/artifacts``)
-``LENDING_CLUB_PATH``    Kaggle CSV (default ``<DATA_ROOT>/raw/accepted_2007_to_2018Q4.csv.gz``)
+``LENDING_CLUB_PATH``    Kaggle CSV (default ``<DATA_ROOT>/raw/Loan_status_2007-2020Q3.csv``, else the 2018Q4 export)
 ``CORS_ALLOW_ALL_ORIGINS`` open CORS (default: on when debug); ``CORS_ALLOWED_ORIGINS`` list
 ``JOBS_SYNC``            run background jobs inline in the request (tests, ``manage.py demo --inline``)
 ``JOB_PROGRESS_INTERVAL`` seconds between job progress writes (default 2)
@@ -182,7 +182,19 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 # --------------------------------------------------------------------------- data & jobs
 DATA_ROOT = env_path("DATA_ROOT", REPO_ROOT / "data")
 ARTIFACT_ROOT = env_path("ARTIFACT_ROOT", DATA_ROOT / "artifacts")
-LENDING_CLUB_PATH = env_path("LENDING_CLUB_PATH", DATA_ROOT / "raw" / "accepted_2007_to_2018Q4.csv.gz")
+#: Default Kaggle export: Loan_status_2007-2020Q3.csv (2007-06..2020-09, observed 2020-10);
+#: the older accepted_2007_to_2018Q4.csv.gz is used when only it was downloaded.
+LENDING_CLUB_PATH = env_path(
+    "LENDING_CLUB_PATH",
+    next(
+        (
+            DATA_ROOT / "raw" / name
+            for name in ("Loan_status_2007-2020Q3.csv", "accepted_2007_to_2018Q4.csv.gz")
+            if (DATA_ROOT / "raw" / name).is_file()
+        ),
+        DATA_ROOT / "raw" / "Loan_status_2007-2020Q3.csv",
+    ),
+)
 JOBS_SYNC = env_bool("JOBS_SYNC", False)
 JOB_PROGRESS_INTERVAL = float(os.environ.get("JOB_PROGRESS_INTERVAL", "2"))
 #: Dotted path of the job backend (``apps.common.backends``). Empty: ``InlineBackend`` when

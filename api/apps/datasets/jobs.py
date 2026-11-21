@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from bayesian_credit.config import ArmSpaceConfig, SegmentationConfig
+from bayesian_credit.config import ArmSpaceConfig, DataConfig, SegmentationConfig
 from bayesian_credit.data import ArmSpace, LendingClubLoader, Segmenter, load_loans, summarize
 from bayesian_credit.pipeline import apply_variable_selection
 from django.conf import settings
@@ -65,12 +65,14 @@ def run_ingest(job: Job, reporter: ProgressReporter) -> None:
         df.attrs = meta_attrs
         reporter.log(f"excluded {len(exclude)} variable(s): {', '.join(exclude)}", 0.6)
     meta = dict(df.attrs.get("synthetic") or {})
+    snapshot = str(df.attrs.get("snapshot_date") or DataConfig().snapshot_date)
     df = df.sort_values("loan_id", kind="mergesort").reset_index(drop=True)
     df.attrs = {}
     path = ds.directory / "loans.parquet"
     LendingClubLoader.to_parquet(df, path)
     reporter.log(f"wrote {path.name} ({path.stat().st_size / 1e6:.1f} MB)", 0.8)
-    summary = summarize(df)
+    summary = summarize(df, DataConfig(snapshot_date=snapshot))
+    summary["snapshot_date"] = snapshot
     summary["variables"] = variable_rows(df)
     if meta:
         summary["synthetic"] = meta
@@ -88,7 +90,7 @@ def run_ingest(job: Job, reporter: ProgressReporter) -> None:
         summary=summary,
     )
     reporter.log(
-        f"dataset ready: {summary['n']:,} loans {to_epoch(summary.get('issue_min'))}..{to_epoch(summary.get('issue_max'))}, "
+        f"dataset ready (observed {snapshot}): {summary['n']:,} loans {to_epoch(summary.get('issue_min'))}..{to_epoch(summary.get('issue_max'))}, "
         f"resolved {summary.get('resolved_share') or 0:.1%}, default rate {summary.get('default_rate') or 0:.1%}",
         1.0,
     )
