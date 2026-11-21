@@ -37,6 +37,7 @@ See ``docs/SIMULATION.md`` for the full protocol (run directory, control files, 
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import signal
 import time
@@ -49,7 +50,7 @@ import numpy as np
 import pandas as pd
 
 from ..bandits.base import POOLED_GROUP, Decision
-from ..config import FrameworkConfig, SimulationConfig
+from ..config import BanditConfig, FrameworkConfig, SimulationConfig
 from ..data.panel import LoanStatePanel
 from ..data.schema import PRE_DECISION_COLUMNS, BorrowerContext, LeakageGuard
 from ..data.segmentation import Segmenter
@@ -285,7 +286,11 @@ class SimulationRunner:
         LeakageGuard.assert_allowed(cfg.psi.features, Stage.PRE_DECISION)
 
         if fitted is None:
-            fitted = fit_models(table, cfg, cfg.train_end, evaluate=False)
+            # a cold start has no trained model to hand over: the reference the replay world
+            # needs (arm grid, groups, MCTM, rate card, prepayment) comes from the loans
+            # issued before the stream starts
+            train_end = sim_cfg.start if sim_cfg.cold_start else cfg.train_end
+            fitted = fit_models(table, cfg, train_end, evaluate=False)
         self.fitted = fitted
         self.arm_space = fitted.arm_space
         self.segmenter0: Segmenter = fitted.segmenter
@@ -575,6 +580,18 @@ class SimulationRunner:
             out[spec.label] = GovernedPolicy(policies[spec.label], self.sentinel, self.arm_space, fallback=fallback)
         return out
 
+    def _agent_prior(self) -> Any:
+        """The policies' warm start: the environment's risk model, or nothing in a cold start."""
+        return None if self.sim_cfg.cold_start else self.env.prior_provider
+
+    def _agent_bandit_cfg(self) -> BanditConfig:
+        """``cfg.bandit``; a cold start makes the flat prior the default warm start (a policy
+        spec may still ask for ``warm_start=global``, which pools what the policy itself
+        has learned; ``risk_model`` has no provider in a cold start and degrades to it)."""
+        if not self.sim_cfg.cold_start:
+            return self.cfg.bandit
+        return dataclasses.replace(self.cfg.bandit, warm_start="flat")
+
     def _init_state(self) -> None:
         cfg = self.cfg
         asof = self.table.iloc[self.asof_rows]
@@ -588,7 +605,7 @@ class SimulationRunner:
         self.segmenter = self.segmenter0
         self._set_env_groups()
         self.sentinel = self._new_sentinel()
-        policies = build_policies(self.specs, self.arm_space, self.segmenter, cfg.bandit, self.env.prior_provider)
+        policies = build_policies(self.specs, self.arm_space, self.segmenter, self._agent_bandit_cfg(), self._agent_prior())
         self.governed = self._wrap(policies)
         self.queue = DelayedFeedbackQueue()
         self.ms: dict[str, Any] = {
@@ -648,7 +665,7 @@ class SimulationRunner:
             st = dict(ck["governed"][spec.label])
             st["policy"] = ck["policies"][spec.label]
             self.governed[spec.label] = GovernedPolicy.from_state(
-                st, self.arm_space, self.segmenter, self.env.prior_provider, sentinel=self.sentinel
+                st, self.arm_space, self.segmenter, self._agent_prior(), sentinel=self.sentinel
             )
         self.queue = DelayedFeedbackQueue.from_dict(ck["queue"])
         self.ms = dict(ck["metrics_state"])
@@ -684,6 +701,7 @@ class SimulationRunner:
                             "policies": self.policy_names,
                             "feedback_mode": FeedbackMode(self.sim_cfg.feedback_mode).value,
                             "breaker_mode": self.sim_cfg.breaker_mode,
+                            "cold_start": bool(self.sim_cfg.cold_start),
                             "pid": os.getpid(),
                         }
                     )
@@ -1046,7 +1064,7 @@ class SimulationRunner:
         self._set_env_groups()
         for gov in self.governed.values():
             if getattr(gov.policy, "contextual", False):  # flat policies have no groups to refine
-                gov.policy.resegment(new_seg, self.env.prior_provider)
+                gov.policy.resegment(new_seg, self._agent_prior())
         self.segmenter = new_seg
         info.update(n_refit_loans=int(len(rows)), n_groups=int(len(set(groups.tolist()))))
         self.ms["resegmentations"].append({"epoch": e, **info})

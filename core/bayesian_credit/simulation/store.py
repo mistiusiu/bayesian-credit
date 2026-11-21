@@ -167,8 +167,12 @@ def read_json(path: str | os.PathLike[str], default: Any = None) -> Any:
 
 
 def config_hash(framework: Mapping[str, Any], simulation: Mapping[str, Any]) -> str:
-    """Stable hash of the (framework, simulation) configuration of a run."""
-    blob = json.dumps({"framework": jsonable(framework), "simulation": jsonable(simulation)}, sort_keys=True)
+    """Stable hash of the (framework, simulation) configuration of a run.
+
+    Settings added after runs already existed are left out while they hold their default
+    (``cold_start=False``), so the checkpoints of those runs keep matching."""
+    sim = {k: v for k, v in dict(simulation).items() if not (k == "cold_start" and not v)}
+    blob = json.dumps({"framework": jsonable(framework), "simulation": jsonable(sim)}, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
