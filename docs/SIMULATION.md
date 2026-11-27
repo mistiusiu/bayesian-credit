@@ -68,7 +68,8 @@ Acknowledgement actions (`ReviewAction`):
 * `rollback` – `GovernedPolicy.handle_acknowledge` restores the champion snapshot taken at
   the trip (everything learned since the incident is discarded);
 * `resegment` – `segmenter.refine()` (next dimension of `refinement_order`, e.g.
-  `fico_band`); the environment's two-stage model is re-fitted on every loan resolved so
+  `fico_band`; dimensions built on a variable the dataset excluded are skipped, so a no-FICO
+  run refines by `dti_band` first); the environment's two-stage model is re-fitted on every loan resolved so
   far under the new keys; every contextual policy is `resegment(new_segmenter,
   env.prior_provider)`-ed (groups re-warm-started lazily; feedback of decisions made under
   the old segmentation updates the pooled level only); `ResegmentationApplied` is logged.
@@ -412,6 +413,7 @@ nothing (UCB1 $39.68M cold vs $39.72M warm), so their exploration is what replac
 missing history.
 
 **Running it.** API: `POST /simulations/` with `cold_start: true` and a `dataset` (no fit
-needed) or a `fit` (reuse its world). Console: Bandit lab → New simulation → *Starting
-knowledge: Cold*. CLI: `scripts/run_pipeline.py --cold-start --policies
+needed; optional `segmentation: {dimensions}` for the world it fits, default the dataset's
+default dimensions) or a `fit` (reuse its world and segmentation). Console: Bandit lab → New
+simulation → *Starting knowledge: Cold* (with no fit reused, the form offers the dimensions). CLI: `scripts/run_pipeline.py --cold-start --policies
 greedy,thompson,epsilon_greedy,ucb1,historical`.

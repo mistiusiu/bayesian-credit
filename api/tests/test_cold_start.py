@@ -3,6 +3,8 @@ without a trained fit (inline jobs; the dataset and fit come from ``conftest.e2e
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 pytestmark = pytest.mark.django_db
@@ -92,3 +94,34 @@ def test_cold_start_validation(api, e2e, extra, field):
 def test_a_fit_and_another_dataset_conflict(api, e2e):
     r = _create(api, fit=e2e["fit"]["id"], dataset=e2e["dataset"]["id"] + 10_000, cold_start=True)
     assert r.status_code == 400 and "dataset" in r.json()
+
+
+def test_a_fitless_cold_start_takes_its_own_segmentation(api, e2e):
+    from apps.simulations.models import Simulation
+
+    dims = ["purpose_group", "home_ownership", "income_band"]
+    r = _create(api, dataset=e2e["dataset"]["id"], cold_start=True, segmentation={"dimensions": dims})
+    assert r.status_code == 201, r.json()
+    assert r.json()["status"] == "completed"
+    sim = Simulation.objects.get(pk=r.json()["id"])
+    assert sim.segmentation_dimensions == dims
+    world = json.loads((sim.directory / "fit" / "segmenter.json").read_text())
+    assert world["dimensions"] == dims  # the replay world is segmented the same way
+
+
+@pytest.mark.parametrize(
+    ("extra", "field"),
+    [
+        ({"segmentation": {"dimensions": ["zip_code"]}}, "segmentation"),
+        ({"segmentation": {"dimensions": []}}, "segmentation"),
+        ({"segmentation": ["grade"]}, "segmentation"),
+    ],
+)
+def test_cold_start_segmentation_validation(api, e2e, extra, field):
+    r = _create(api, dataset=e2e["dataset"]["id"], cold_start=True, **extra)
+    assert r.status_code == 400 and field in r.json(), r.json()
+
+
+def test_a_run_from_a_fit_keeps_the_fits_segmentation(api, e2e):
+    r = _create(api, fit=e2e["fit"]["id"], cold_start=True, segmentation={"dimensions": ["grade"]})
+    assert r.status_code == 400 and "segmentation" in r.json(), r.json()
