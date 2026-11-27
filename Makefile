@@ -2,7 +2,7 @@ SHELL := /bin/bash
 VENV ?= .venv
 PY := $(VENV)/bin/python
 
-.PHONY: help setup lock test lint verify infra infra-down worker api web pipeline synthetic data docker k8s clean
+.PHONY: help setup lock test lint verify infra infra-down worker api web pipeline synthetic data docker k8s clean ablation-pilot ablation-full ablation-clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -63,6 +63,17 @@ docker: ## Build and start Temporal, api, worker and frontend containers
 
 k8s: ## Apply the K3s manifests
 	kubectl apply -k deploy/k8s
+
+ABLATION_MODE ?= docker
+
+ablation-pilot: ## Reproduce the pilot ablation study (ABLATION_MODE=docker|cli|k8s; docs/REPRODUCE.md)
+	scripts/reproduce_ablation.sh $(ABLATION_MODE) pilot
+
+ablation-full: ## Reproduce the full-dataset ablation study (ABLATION_MODE=docker|cli|k8s)
+	scripts/reproduce_ablation.sh $(ABLATION_MODE) full
+
+ablation-clean: ## List the caches an analysis left behind (ARGS=--yes deletes; keeps results and graph data)
+	python3 scripts/ablation/clean.py $(ARGS)
 
 clean: ## Remove caches and build outputs
 	rm -rf core/.pytest_cache api/.pytest_cache .ruff_cache frontend/dist
