@@ -94,6 +94,21 @@ def apply_exclusions(attrs: dict, ds: Dataset, errors: dict[str, list[str]]) -> 
     return dims, hierarchy
 
 
+def segmentation_block(dims: list[str] | None, ds: Dataset) -> dict | None:
+    """FrameworkConfig ``segmentation`` section for a dataset: the chosen dimensions plus a
+    refinement order without the dimensions whose source variable the dataset excluded, so a
+    breaker ``resegment`` never refines on a constant ``"unknown"`` column (``None`` = defaults)."""
+    excluded = set((ds.params or {}).get("exclude_variables") or [])
+    if not dims and not excluded:
+        return None
+    block: dict = {"dimensions": list(dims or SegmentationConfig().dimensions)}
+    if excluded:
+        block["refinement_order"] = [
+            d for d in SegmentationConfig().refinement_order if DIMENSIONS[d][0] not in excluded
+        ]
+    return block
+
+
 def validate_sections(attrs: dict) -> dict[str, list[str]]:
     """Field-level checks with dotted keys (``hierarchy.kappa_group``) — docs/API.md §1.2, §6.1."""
     errors: dict[str, list[str]] = {}
@@ -241,8 +256,9 @@ class FitCreateSerializer(serializers.Serializer):
             "data": data,
             "train_end": epoch_start(train_end),
         }
-        if dims:
-            raw["segmentation"] = {"dimensions": list(dims)}
+        seg = segmentation_block(dims, ds)
+        if seg:
+            raw["segmentation"] = seg
         try:
             framework = FrameworkConfig.from_dict(raw)
             framework.validate()

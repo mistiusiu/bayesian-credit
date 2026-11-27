@@ -13,7 +13,7 @@ from apps.common.serializers import JobSerializer
 from apps.common.utils import epoch_start, parse_epoch, to_epoch
 from apps.datasets.models import Dataset
 from apps.fits.models import Fit
-from apps.fits.serializers import apply_exclusions
+from apps.fits.serializers import apply_exclusions, segmentation_block, validate_sections
 
 from .services import default_psi_settings
 
@@ -45,7 +45,8 @@ class SimulationCreateSerializer(serializers.Serializer):
     A warm run names a ``fit`` (its trained model warm-starts the policies). A cold start
     (``cold_start: true``) runs the policies without an offline model; it names a ``fit`` to
     reuse that fit's configuration and replay world, or just a ``dataset``: the replay world
-    is then built from the loans issued before ``start`` with the default configuration."""
+    is then built from the loans issued before ``start`` with the default configuration and
+    the given ``segmentation`` (default: the dataset's default dimensions)."""
 
     fit = serializers.IntegerField(required=False, allow_null=True)
     dataset = serializers.IntegerField(
@@ -55,6 +56,12 @@ class SimulationCreateSerializer(serializers.Serializer):
         required=False,
         default=False,
         help_text="Policies start from a flat prior and learn online only (no risk-model warm start)",
+    )
+    segmentation = serializers.JSONField(
+        required=False,
+        allow_null=True,
+        help_text="Fit-less cold start only: {dimensions: SegmentationDimension[]} of the replay world and the "
+        "policies' groups (default: the dataset's default dimensions)",
     )
     name = serializers.CharField(max_length=200)
     policies = serializers.ListField(child=serializers.CharField(help_text=S.POLICY_HELP), allow_empty=False)
@@ -100,6 +107,10 @@ class SimulationCreateSerializer(serializers.Serializer):
                 fit = Fit.objects.select_related("dataset", "job").get(pk=attrs["fit"])
             except Fit.DoesNotExist:
                 raise serializers.ValidationError({"fit": [f"fit {attrs['fit']} does not exist"]}) from None
+            if attrs.get("segmentation") is not None:
+                raise serializers.ValidationError(
+                    {"segmentation": [f"The run uses fit {fit.pk}'s segmentation; omit segmentation or the fit."]}
+                )
             if attrs.get("dataset") is not None and attrs["dataset"] != fit.dataset_id:
                 raise serializers.ValidationError(
                     {"dataset": [f"fit {fit.pk} was trained on dataset {fit.dataset_id}; omit dataset or match it"]}
@@ -115,13 +126,15 @@ class SimulationCreateSerializer(serializers.Serializer):
             ds = Dataset.objects.select_related("job").get(pk=attrs["dataset"])
         except Dataset.DoesNotExist:
             raise serializers.ValidationError({"dataset": [f"dataset {attrs['dataset']} does not exist"]}) from None
-        errors: dict[str, list[str]] = {}
-        dims, hierarchy = apply_exclusions({}, ds, errors)
+        given = {"segmentation": attrs["segmentation"]} if attrs.get("segmentation") is not None else {}
+        errors = validate_sections(given)
+        dims, hierarchy = apply_exclusions(given, ds, errors) if not errors else (None, {})
         if errors:
             raise serializers.ValidationError(errors)
         raw: dict = {"hierarchy": hierarchy, "data": {"snapshot_date": ds.snapshot_date}}
-        if dims:
-            raw["segmentation"] = {"dimensions": list(dims)}
+        seg = segmentation_block(dims, ds)
+        if seg:
+            raw["segmentation"] = seg
         return None, ds, FrameworkConfig.from_dict(raw)
 
     def validate(self, attrs):

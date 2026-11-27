@@ -67,6 +67,18 @@ def test_ablated_dataset_fit_and_simulation(api):
     fit = fit.json()
     assert fit["status"] == "ready", fit["job"]
     assert fit["config"]["segmentation"]["dimensions"] == ["purpose_group", "home_ownership"]
+    # a breaker resegment never refines on an excluded variable (it would be a constant "unknown")
+    from apps.fits.models import Fit
+
+    order = Fit.objects.get(pk=fit["id"]).framework["segmentation"]["refinement_order"]
+    assert order[0] == "dti_band" and not {"fico_band", "sub_grade"} & set(order)
+    cold = api.post(
+        "/api/v1/simulations/",
+        {"dataset": ds["id"], "cold_start": True, "name": "cold", "policies": ["thompson"],
+         "segmentation": {"dimensions": ["fico_band", "purpose_group"]}},
+        format="json",
+    )
+    assert cold.status_code == 400 and "fico_band" in " ".join(cold.json()["segmentation"])
 
     bad_psi = api.post(
         "/api/v1/simulations/",

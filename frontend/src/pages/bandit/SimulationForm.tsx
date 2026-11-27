@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { ApiError, useCreateSimulation } from '@/api/client';
-import type { BreakerMode, FeedbackMode, HindsightSample, PolicyName, ReviewAction, Simulation } from '@/api/types';
+import type { BreakerMode, FeedbackMode, HindsightSample, PolicyName, ReviewAction, SegmentationDimension, Simulation } from '@/api/types';
 import { Button } from '@/components/ui/Button';
 import { Chips } from '@/components/ui/Chips';
 import { Disclosure } from '@/components/ui/Disclosure';
@@ -8,7 +8,7 @@ import { Field, FormError, NumberInput, Select, TextInput } from '@/components/u
 import { Segmented } from '@/components/ui/Segmented';
 import { Toggle } from '@/components/ui/Toggle';
 import { fmt } from '@/lib/format';
-import { BREAKER_MODES, DEFAULT_HINDSIGHT, FEEDBACK_MODES, POLICIES, policyBlurb, policyLabel, PSI_FEATURES, REVIEW_ACTIONS } from '@/lib/domain';
+import { BREAKER_MODES, DEFAULT_FIT_CONFIG, DEFAULT_HINDSIGHT, FEEDBACK_MODES, POLICIES, policyBlurb, policyLabel, PSI_FEATURES, REVIEW_ACTIONS, SEGMENTATION_DIMENSIONS } from '@/lib/domain';
 
 const HINDSIGHT: { value: HindsightSample; label: string; title: string }[] = [
   { value: 'elapsed', label: 'Term elapsed', title: 'Resolved loans whose term had elapsed by the snapshot: unbiased (default)' },
@@ -54,6 +54,10 @@ export function SimulationForm({
   // a cold start needs no fit: without one (or by choice) the dataset alone is replayed
   const useFit = !cold || (reuseFit && fitId !== null);
   const ready = useFit ? fitId !== null : datasetId !== null;
+  // a fit-less cold start segments its own world (dimensions the dataset kept)
+  const dimOptions = SEGMENTATION_DIMENSIONS.filter((d) => !excluded.includes(d.source));
+  const [dimsState, setDims] = useState<SegmentationDimension[]>(DEFAULT_FIT_CONFIG.segmentation.dimensions);
+  const dims = dimsState.filter((d) => dimOptions.some((o) => o.key === d));
   const setKnowledge = (k: Knowledge) => {
     setKnowledgeState(k);
     setPolicies(k === 'cold' ? COLD_POLICIES : WARM_POLICIES);
@@ -90,6 +94,7 @@ export function SimulationForm({
       {
         ...(useFit ? { fit: fitId } : { dataset: datasetId }),
         cold_start: cold,
+        ...(useFit ? {} : { segmentation: { dimensions: dims } }),
         name: name.trim() || `${cold ? 'Cold start · ' : ''}${policies.map((p) => policyLabel(p)).join(' vs ')} · ${feedback}`,
         policies,
         feedback_mode: feedback,
@@ -134,6 +139,13 @@ export function SimulationForm({
                 : 'This dataset has no ready fit, and a cold start does not need one: the replay world is fitted on the loans issued before the first epoch.'
             }
           />
+        )}
+        {!useFit && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-ink-2">Segmentation of the replay world (borrower group g)</span>
+            <Chips<SegmentationDimension> label="Segmentation dimensions" options={dimOptions.map((d) => ({ value: d.key, label: d.label, title: `derived from ${d.source}` }))} value={dims} onChange={setDims} />
+            {errs.segmentation && <p className="text-2xs text-delta-bad">{errs.segmentation.join(' ')}</p>}
+          </div>
         )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Field label="Name" error={errs.name}>
@@ -203,7 +215,7 @@ export function SimulationForm({
         </div>
         <FormError message={create.error && !Object.keys(errs).length ? create.error.message : null} />
         <div className="flex items-center gap-3">
-          <Button type="submit" variant="primary" icon="play" loading={create.isPending} disabled={!ready || !policies.length || !features.length}>
+          <Button type="submit" variant="primary" icon="play" loading={create.isPending} disabled={!ready || !policies.length || !features.length || (!useFit && !dims.length)}>
             {cold ? 'Start cold-start simulation' : 'Start simulation'}
           </Button>
           <span className="text-xs text-muted">

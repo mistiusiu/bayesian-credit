@@ -750,7 +750,7 @@ A warm run names a `fit`, which must be `ready` (409). A **cold start** (`cold_s
 docs/SIMULATION.md §11) runs the policies without an offline model. It can name a `fit` to
 reuse that fit's replay world, or only a `dataset` (which must be `ready`, else 409). In that
 case no fit is needed: the defaults of `FrameworkConfig` apply (with the dataset's snapshot and
-variable selection), and the worker fits the replay world's reference on the loans issued
+variable selection) except for `segmentation`, which the request may set, and the worker fits the replay world's reference on the loans issued
 before `start` into `<run_dir>/fit`. Omitted fields take these defaults (`SimulationConfig` /
 `PSIConfig` in `core/bayesian_credit/config.py`):
 
@@ -760,6 +760,7 @@ before `start` into `<run_dir>/fit`. Omitted fields take these defaults (`Simula
 | `fit` | — | required unless `cold_start` (400 `fit`) |
 | `dataset` ★ | — | cold start without a fit: the dataset to replay (400 `dataset` when missing / unknown, or when it differs from the fit's) |
 | `cold_start` ★ | `false` | policies start from the flat prior N(`prior_mu`, `prior_sigma`²) with no risk-model warm start |
+| `segmentation` ★ | the dataset's default dimensions | cold start without a fit only: `{ dimensions: SegmentationDimension[] }` of the replay world and the policies' groups, validated like a fit's (400 `segmentation` on an unknown or repeated dimension, one built on an excluded variable, or when a `fit` is named: the run then uses the fit's segmentation) |
 | `policies` | — | required, ≥ 1 distinct `PolicyName` |
 | `feedback_mode` | `"simulated"` | `simulated` (posterior-predictive environment) · `replay` (rejection sampling: update only when arm == historical) · `hybrid` |
 | `start` / `end` | the fit's `train_end` (cold start without a fit: `"2015-01"`) / the dataset's last epoch | inclusive epochs inside the dataset range; `start` must leave a reference window |
@@ -1101,7 +1102,7 @@ it is acknowledged automatically with `acknowledged_by = "auto_ack"`, `auto = tr
 | Action | Effect on the run |
 |---|---|
 | `resume` | keep the incumbent policy, unfreeze updates; reference window unchanged (the breaker usually stays half-open while drift persists) |
-| `resegment` | `Segmenter.refine()` (next dimension of `refinement_order`), refit the risk model on data to date, re-warm-start the bandits, rebase the reference window; `segmentation_after` set |
+| `resegment` | `Segmenter.refine()` (next dimension of `refinement_order`, which skips dimensions built on a variable the dataset excluded), refit the risk model on data to date, re-warm-start the bandits, rebase the reference window; `segmentation_after` set |
 | `rollback` | restore the champion snapshot taken before the drift and rebase the reference window |
 
 The breaker moves to `half_open`; a run waiting in `awaiting_review` resumes from the next epoch.
