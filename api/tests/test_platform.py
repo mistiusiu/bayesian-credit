@@ -192,3 +192,36 @@ def test_openapi_schema_generates_without_warnings(tmp_path):
 def test_swagger_ui_served(client):
     assert client.get("/api/docs/").status_code == 200
     assert client.get("/api/schema/").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("filename", "issue_to", "bad_to"),
+    [("Loan_status_2007-2020Q3.csv", "2020-09", "2020-10"), ("accepted_2007_to_2018Q4.csv.gz", "2018-12", "2019-01")],
+)
+def test_lending_club_window_follows_the_file(settings, tmp_path, filename, issue_to, bad_to):
+    from apps.datasets.serializers import DatasetCreateSerializer
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / filename).write_text("id,loan_status\n")
+    settings.DATA_ROOT = tmp_path
+    settings.LENDING_CLUB_PATH = raw / filename
+    ser = DatasetCreateSerializer(data={"name": "lc", "source": "lending_club"})
+    assert ser.is_valid(), ser.errors
+    assert (ser.validated_data["issue_from"], ser.validated_data["issue_to"]) == ("2012-01", issue_to)
+    ser = DatasetCreateSerializer(data={"name": "lc", "source": "lending_club", "issue_to": bad_to})
+    assert not ser.is_valid() and filename in ser.errors["issue_from"][0]
+    synth = DatasetCreateSerializer(data={"name": "s", "source": "synthetic"})
+    assert synth.is_valid() and synth.validated_data["issue_to"] == "2018-12"
+
+
+def test_dataset_reports_its_snapshot(api):
+    from apps.datasets.models import Dataset
+
+    params = {"name": "lc", "source": "lending_club", "issue_from": "2012-01", "issue_to": "2020-09"}
+    ready = Dataset.objects.create(
+        name="lc", source="lending_club", status="ready", params=params, summary={"n": 1, "snapshot_date": "2020-10-31"}
+    )
+    pending = Dataset.objects.create(name="p", source="lending_club", status="queued", params=params)
+    assert api.get(f"/api/v1/datasets/{ready.pk}/").json()["snapshot_date"] == "2020-10-31"
+    assert api.get(f"/api/v1/datasets/{pending.pk}/").json()["snapshot_date"] is None

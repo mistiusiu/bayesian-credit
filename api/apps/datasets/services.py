@@ -1,7 +1,7 @@
 """Dataset read side: Table 3 variables, feature summaries and the paginated loan browser.
 
 Loans are read straight from ``loans.parquet`` with DuckDB (``SELECT … LIMIT/OFFSET``) so a
-page of the 2.26 M-row Lending Club table never loads the whole frame into pandas.
+page of the 2.9 M-row Lending Club table never loads the whole frame into pandas.
 """
 
 from __future__ import annotations

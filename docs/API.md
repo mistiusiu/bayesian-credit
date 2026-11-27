@@ -249,7 +249,7 @@ queue in the last few minutes.
 | `seed` | int / null | 42 | |
 | `max_rows` | int / null | null (whole file) | `lending_club` only, ≥ 1,000 |
 | `sample_fraction` | number / null | null | `lending_club` only, (0, 1] |
-| `issue_from` / `issue_to` | epoch / null | `2012-01` / `2018-12` | inclusive; within 2007-06 … 2018-12 |
+| `issue_from` / `issue_to` | epoch / null | `2012-01` / last issue month of the source | inclusive. `lending_club`: within the file's range, 2007-06 … 2020-09 for `Loan_status_2007-2020Q3.csv` (default `issue_to` 2020-09) or 2007-06 … 2018-12 for the legacy `accepted_2007_to_2018Q4.csv.gz`. `synthetic`: default `issue_to` 2018-12, at most 2019-03 |
 | `shift` | `{ at: epoch, deltas: { feature: number } }` / null | null | `synthetic` only; additive shift in feature units applied to loans issued on/after `at`, e.g. `{ "at": "2016-06", "deltas": { "fico_range_low": -25, "dti": 5 } }` |
 | `exclude_variables` | string[] / null | `[]` | Table 3 variables the dataset is built **without** (ablations, e.g. the four FICO columns). Only pre-decision and interim variables are selectable (`GET /datasets/catalogue/`); 400 on an unknown or required one. Echoed in Table 3 order. |
 
@@ -270,7 +270,10 @@ the arm, the time index and the outcome labels and cannot be excluded.
 
 ### 5.2 `GET /datasets/` · `GET /datasets/{id}/` → `Dataset`
 
-Statistics are `null` (and `status_counts` `{}`) until `status` is `ready`.
+Statistics are `null` (and `status_counts` `{}`) until `status` is `ready`. `snapshot_date` is
+the day the loan statuses were observed, where outcomes are censored and which fits and
+simulations on the dataset inherit: `2020-10-31` for the 2007-2020Q3 export, `2019-03-31` for the
+legacy export and for synthetic datasets.
 
 ```jsonc
 {
@@ -279,6 +282,7 @@ Statistics are `null` (and `status_counts` `{}`) until `status` is `ready`.
               "max_rows": null, "sample_fraction": null, "issue_from": "2012-01", "issue_to": "2018-12",
               "shift": { "at": "2016-06", "deltas": { "fico_range_low": -25, "dti": 5 } } },
   "n_loans": 200000, "n_resolved": 113145, "issue_min": "2012-01", "issue_max": "2018-12",
+  "snapshot_date": "2019-03-31",     // outcomes observed (censored) here
   "resolved_share": 0.5657,          // terminal outcome known (Fully Paid / Charged Off / Default variants)
   "default_rate": 0.1914,            // defaults / resolved
   "status_counts": { "Fully Paid": 91490, "Current": 84321, "Charged Off": 21650, "Late (31-120 days)": 1465,
