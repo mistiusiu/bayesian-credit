@@ -250,6 +250,24 @@ def test_rollback_restores_the_incident_champion(sentinel, small_arm_space, segm
     assert not gov.frozen
 
 
+def test_compact_state_pickles_to_the_same_policy(sentinel, small_arm_space, segmenter):
+    """Checkpoints use state(compact=True): numpy arrays instead of lists, same values."""
+    import pickle
+
+    pol = trained_contextual(small_arm_space, segmenter)
+    gov = GovernedPolicy(pol, sentinel, small_arm_space)
+    sentinel.evaluate(window(np.random.default_rng(11), shift=2.0), "e1")  # trips: champion taken
+    gov.update(Decision(arm=1, group=pol.group_for(CTX), policy_name=pol.name), 3.0)
+    compact = gov.state(compact=True)
+    assert isinstance(compact["champion"]["groups"][next(iter(compact["champion"]["groups"]))]["mu"], np.ndarray)
+    sentinel2 = PSISentinel.from_dict(sentinel.to_dict())
+    a = GovernedPolicy.from_state(pickle.loads(pickle.dumps(compact)), small_arm_space, sentinel=sentinel2)
+    b = GovernedPolicy.from_state(json.loads(json.dumps(gov.state())), small_arm_space,
+                                  sentinel=PSISentinel.from_dict(sentinel.to_dict()))
+    assert a.champion_snapshot == b.champion_snapshot == gov.champion_snapshot
+    assert json.loads(json.dumps(a.state())) == json.loads(json.dumps(b.state()))
+
+
 def test_governed_state_roundtrip_while_open(sentinel, small_arm_space, segmenter):
     pol = trained_contextual(small_arm_space, segmenter)
     gov = GovernedPolicy(pol, sentinel, small_arm_space)

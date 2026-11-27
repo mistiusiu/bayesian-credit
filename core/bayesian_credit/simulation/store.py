@@ -278,14 +278,37 @@ class Checkpoint:
         return self.latest_path.is_file()
 
     def write(self, state: Mapping[str, Any], epoch: str) -> tuple[Path, int]:
-        """Write ``state`` as ``latest.pkl`` and ``epoch=<epoch>.pkl``; returns (path, bytes)."""
-        data = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
+        """Write ``state`` as ``epoch=<epoch>.pkl`` and ``latest.pkl``; returns (path, bytes).
+
+        The pickle is streamed straight into the file (no in-memory byte copy of a state that
+        can run to gigabytes), fsynced and renamed into place; ``latest.pkl`` is then an
+        atomic file-to-file copy - a separate copy, so a damaged ``latest.pkl`` still leaves
+        the epoch-stamped one readable.
+        """
         self.directory.mkdir(parents=True, exist_ok=True)
         stamped = self.directory / epoch_file_name(epoch, "pkl")
-        atomic_write_bytes(stamped, data)
-        atomic_write_bytes(self.latest_path, data)
+        tmp = _tmp_path(stamped)
+        try:
+            with open(tmp, "wb") as fh:
+                pickle.dump(dict(state), fh, protocol=pickle.HIGHEST_PROTOCOL)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, stamped)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+        copy = _tmp_path(self.latest_path)
+        try:
+            shutil.copyfile(stamped, copy)
+            with open(copy, "rb+") as fh:
+                os.fsync(fh.fileno())
+            os.replace(copy, self.latest_path)
+        finally:
+            if copy.exists():
+                copy.unlink()
+        _fsync_dir(self.directory)
         self._prune()
-        return self.latest_path, len(data)
+        return self.latest_path, stamped.stat().st_size
 
     def _prune(self) -> None:
         stamped = self.list()

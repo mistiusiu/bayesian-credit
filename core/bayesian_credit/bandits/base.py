@@ -180,13 +180,13 @@ class Policy(ABC):
         self._frozen = False
 
     @abstractmethod
-    def snapshot(self) -> dict[str, Any]: ...
+    def snapshot(self, compact: bool = False) -> dict[str, Any]: ...
 
     @abstractmethod
     def restore(self, snap: Mapping[str, Any]) -> None: ...
 
     @abstractmethod
-    def state(self) -> dict[str, Any]: ...
+    def state(self, compact: bool = False) -> dict[str, Any]: ...
 
     @classmethod
     @abstractmethod
@@ -680,11 +680,12 @@ class ArmSetPolicy(Policy):
         self._n_updates += 1
 
     # ----- snapshots & state -------------------------------------------------------------------
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, compact: bool = False) -> dict[str, Any]:
+        """Learning state; JSON-able by default, numpy arrays per group with ``compact``."""
         return {
             "format": self.snapshot_format,
-            "groups": {g: a.to_dict() for g, a in self._groups.items()},
-            "pooled": self.pooled.snapshot() if self.pooled is not None else None,
+            "groups": {g: a.to_dict(compact) for g, a in self._groups.items()},
+            "pooled": self.pooled.snapshot(compact) if self.pooled is not None else None,
             "segmenter": self.segmenter.to_dict() if self.segmenter is not None else None,
             "seg_version": self._seg_version,
             "n_decisions": self._n_decisions,
@@ -712,8 +713,8 @@ class ArmSetPolicy(Policy):
         self._n_decisions = int(snap.get("n_decisions", 0))
         self._n_updates = int(snap.get("n_updates", 0))
 
-    def state(self) -> dict[str, Any]:
-        st = self.snapshot()
+    def state(self, compact: bool = False) -> dict[str, Any]:
+        st = self.snapshot(compact)
         st.update(
             {
                 "class": type(self).__name__,

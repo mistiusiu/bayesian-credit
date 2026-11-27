@@ -546,7 +546,10 @@ class GovernedPolicy(Policy):
 
     @property
     def champion_snapshot(self) -> dict[str, Any] | None:
-        return self._champion
+        """The incident's champion (JSON-able; stored internally as numpy arrays)."""
+        from ..bandits.base import jsonable
+
+        return None if self._champion is None else jsonable(self._champion)
 
     @property
     def champion_epoch(self) -> str | None:
@@ -589,7 +592,8 @@ class GovernedPolicy(Policy):
             self.policy.unfreeze()
 
     def _take_champion(self, epoch: str | None) -> None:
-        self._champion = self.policy.snapshot()
+        # kept in memory for the whole incident: numpy arrays, not lists
+        self._champion = self.policy.snapshot(compact=True)
         self._champion_epoch = epoch
         self._champion_means = None
 
@@ -698,18 +702,21 @@ class GovernedPolicy(Policy):
         self._sync()
         self.policy.update(decision, reward, kind, weight)
 
-    def snapshot(self) -> dict[str, Any]:
-        return self.policy.snapshot()
+    def snapshot(self, compact: bool = False) -> dict[str, Any]:
+        return self.policy.snapshot(compact)
 
     def restore(self, snap: Mapping[str, Any]) -> None:
         self.policy.restore(snap)
 
-    def state(self) -> dict[str, Any]:
+    def state(self, compact: bool = False) -> dict[str, Any]:
+        """JSON-able by default; ``compact`` (checkpoints) keeps numpy arrays."""
+        from ..bandits.base import jsonable
+
         return {
             "class": type(self).__name__,
             "fallback": self.fallback,
-            "policy": self.policy.state(),
-            "champion": self._champion,
+            "policy": self.policy.state(compact),
+            "champion": self._champion if compact or self._champion is None else jsonable(self._champion),
             "champion_epoch": self._champion_epoch,
             "manual_frozen": self._manual_frozen,
             "n_fallback": self._n_fallback,
