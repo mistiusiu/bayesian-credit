@@ -329,7 +329,8 @@ only fills in a missing dataset path / fit directory.
 45 s of simulation, of which ~25 s are the bandits' own `update()` calls for ~2.8M interim
 and ~120k terminal observations and ~12 s their `select()` calls; the environment's
 valuation, queue and I/O take the rest. Peak RSS of the real-data run (~2 GB) is set by the
-loader's DuckDB scan of the 2.26M-row cache; the modelling stages stay around 1 GB.
+loader's DuckDB scan of the parquet cache (2.93M rows for the 2007–2020Q3 export); the
+modelling stages stay around 1 GB.
 
 ## 10. Known modelling caveat (and what was done about it)
 

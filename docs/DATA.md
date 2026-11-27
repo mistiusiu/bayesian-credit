@@ -106,9 +106,10 @@ dataset inherits it as `framework.data.snapshot_date`. `DataConfig.snapshot_date
 | retained column missing from the file | all‑NULL with the canonical dtype; reported by `describe_source()` |
 
 **Cleaning.** A row is dropped if any of `loan_id`, `loan_status`, `issue_d`,
-`loan_amnt`, `int_rate` or `term` is NULL. This removes the 33 all‑NULL rows at the end
-of the Kaggle file. A row is also dropped if `policy_code` is present and not 1 (it is
-always `'1.0'` in this export). The result is **2,260,668** loans.
+`loan_amnt`, `int_rate` or `term` is NULL. A row is also dropped if `policy_code` is
+present and not 1. The 2007–2020Q3 export keeps **2,925,492** of its 2,925,493 rows; in the
+legacy export this removes the 33 all‑NULL rows at the end of the file (`policy_code` is
+always `'1.0'` there), leaving 2,260,668 loans.
 
 **Selection.** `load(max_rows, sample_fraction, seed, issue_from, issue_to, columns, order, use_cache)`:
 - `issue_from` and `issue_to` are inclusive dates (`"2015-12"` includes loans issued Dec‑2015).
@@ -129,8 +130,9 @@ always `'1.0'` in this export). The result is **2,260,668** loans.
   name raises `DataSourceError`, which enforces data minimisation.
 
 **Parquet cache.** `build_cache()` writes the full canonical table once as zstd parquet
-(148 MB), sorted by `(issue_d, loan_id)`, to `data/processed/
-accepted_2007_to_2018Q4.canonical.v3.parquet`. A JSON sidecar records the source size,
+(193 MB for the 2007–2020Q3 export, built in 7 s; 148 MB for the legacy one), sorted by
+`(issue_d, loan_id)`, to `data/processed/<file stem>.canonical.v3.parquet`, e.g.
+`Loan_status_2007-2020Q3.canonical.v3.parquet`. A JSON sidecar records the source size,
 mtime and `LOADER_VERSION`, so the cache goes stale when the CSV changes. With
 `cache=True` (default), the first full‑scan query builds the cache and later queries
 read it. `order="file"` with `max_rows` always reads the CSV. `to_parquet(df, path)` and
@@ -138,18 +140,21 @@ read it. `order="file"` with `max_rows` always reads the CSV. `to_parquet(df, pa
 intact. `describe_source(count_rows=True)` returns existence, size, column presence,
 renames, the raw `count(*)` (about 10 s) and the cached row count.
 
-**Timings** (laptop, DuckDB 1.5, full Kaggle file):
+**Timings** (12‑core laptop, DuckDB 1.5, the whole 2007–2020Q3 export; re‑measured
+2026‑11‑27, legacy export in brackets):
 
 | Load | Time |
 |---|---|
-| CSV, `max_rows=200_000` (issue order) | 12 s |
-| CSV, `sample_fraction=0.0885` (≈200k rows) | 12–13 s |
-| CSV, `order="file"`, 20k rows | 1 s |
-| build the parquet cache | 14 s |
-| parquet, 200k rows (any order or sample) | 0.6–1.0 s |
-| parquet, all 2.26M rows | 3 s |
-| `derive_outcomes` on 2.26M rows | 7 s |
-| `LoanStatePanel` on 2.26M rows | 4 s |
+| CSV, `max_rows=200_000` (issue order) | 7 s (12 s) |
+| CSV, `sample_fraction=0.0684` (≈200k rows) | 6 s (12–13 s) |
+| CSV, `order="file"`, 20k rows | 0.4 s (1 s) |
+| build the parquet cache | 7 s (14 s) |
+| parquet, 200k rows (any order or sample) | 0.9–1.2 s (0.6–1.0 s) |
+| parquet, all 2.93M rows | 5 s (3 s) |
+| `derive_outcomes` on 2.93M rows | 13 s (7 s) |
+| `LoanStatePanel` on 2.93M rows | 5 s (4 s) |
+
+Loading, deriving and paneling the whole export peaks at about 4.9 GB RSS.
 
 ## 3. Outcomes (`derive_outcomes(df, arm_space=None, segmenter=None, cfg=DataConfig(), *, snapshot_date=None)`)
 
@@ -204,7 +209,7 @@ population where repayment after delinquency is unambiguous. Late, grace and cha
 loans keep their rules.
 
 - Paths are stored as at most 4 `(state, run_length)` segments per loan, never as a dense
-  month grid. Counts come from vectorised `np.bincount`; 2.26M loans take 4 s.
+  month grid. Counts come from vectorised `np.bincount`; 2.93M loans take 5 s.
 - `counts[i, j]` (indexed by `State`), `n_loans`, `n_loan_months`, `n_censored` (paths
   ending in C or D), `n_skipped` (unknown statuses) and `counts_by_cohort[issue_year]` are
   always computed. `paths` (`loan_id`, `segments`) is only kept with `keep_paths=True`.
@@ -233,17 +238,19 @@ loans keep their rules.
     vectorised version. Scalar and vectorised versions are tested to agree.
 - `empirical_matrix()` gives the row‑normalised counts; `to_dict()` gives the JSON for the API.
 
-Reconstructed one‑step matrix (row‑normalised counts = MLE), real data versus synthetic.
-The D row is identical under both structures; only the C row differs (C→R).
+Reconstructed one‑step matrix (row‑normalised counts = MLE), real data (whole 2007–2020Q3
+export, snapshot 2020‑10‑31) versus synthetic. The D row is identical under both structures;
+only the C row differs (C→R).
 
-| row | real 2.26M | synthetic 200k |
-|---|---|---|
-| C (PROPOSAL): C, D, R, L | 0.9918, 0.0082, 0, 0 | 0.9932, 0.0068, 0, 0 |
-| C (EXTENDED): C, D, R, L | 0.9676, 0.0080, 0.0244, 0 | 0.9699, 0.0066, 0.0234, 0 |
-| **D: C, D, R, L** | **0.0161, 0.7286, 0.0210, 0.2343** | 0.0182, 0.7269, 0.0246, 0.2304 |
+| row | real 2.93M (2020Q3) | real 2.26M (legacy) | synthetic 200k |
+|---|---|---|---|
+| C (PROPOSAL): C, D, R, L | 0.9920, 0.0080, 0, 0 | 0.9918, 0.0082, 0, 0 | 0.9932, 0.0068, 0, 0 |
+| C (EXTENDED): C, D, R, L | 0.9669, 0.0078, 0.0253, 0 | 0.9676, 0.0080, 0.0244, 0 | 0.9699, 0.0066, 0.0234, 0 |
+| **D: C, D, R, L** | **0.0133, 0.7285, 0.0257, 0.2325** | 0.0161, 0.7286, 0.0210, 0.2343 | 0.0182, 0.7269, 0.0246, 0.2304 |
 
-Real D‑row counts: D→C 18,561 · D→D 837,565 · D→R 24,097 · D→L 269,360. Under the old rule
-(episode at the midpoint, no D→R) the real row was 0.037 / 0.729 / 0 / 0.234.
+Real D‑row counts (2020Q3): D→C 20,733 · D→D 1,139,556 · D→R 40,143 · D→L 363,742 (legacy:
+18,561 · 837,565 · 24,097 · 269,360). Under the old rule (episode at the midpoint, no D→R)
+the legacy row was 0.037 / 0.729 / 0 / 0.234.
 
 ## 5. Synthetic generator (`SyntheticLendingClub`)
 
@@ -330,16 +337,18 @@ aliases are `generate_table`, module‑level `generate(n, seed, **kw)`, and
   and all calibration constants are fixed. So **the pre‑shift cohort is bit‑identical with
   and without a shift**, a clean counterfactual for Sentinel experiments.
 
-**Calibration against the real file** (synthetic: default settings, 200k loans):
+**Calibration against the real files** (synthetic: default settings, 200k loans). The
+synthetic twin was calibrated against the legacy export, whose 2012–2018 window it
+reproduces; the 2020Q3 column shows how the default export compares.
 
-| statistic | real (2.26M) | synthetic |
-|---|---|---|
-| default rate among resolved | 0.200 | 0.176 |
-| default rate by grade A / C / E / G | 0.060 / 0.224 / 0.384 / 0.497 | 0.064 / 0.182 / 0.370 / 0.589 |
-| resolved share | 0.596 | 0.575 |
-| sub‑grade AUC (resolved) | 0.69 | 0.70 |
-| mean recovery, principal basis | 0.366 | 0.341 |
-| recoveries / funded (charged off) | 0.075 | 0.071 |
+| statistic | real 2.93M (2020Q3) | real 2.26M (legacy) | synthetic |
+|---|---|---|---|
+| default rate among resolved | 0.195 | 0.200 | 0.176 |
+| default rate by grade A / C / E / G | 0.065 / 0.224 / 0.376 / 0.488 | 0.060 / 0.224 / 0.384 / 0.497 | 0.064 / 0.182 / 0.370 / 0.589 |
+| resolved share | 0.637 | 0.596 | 0.575 |
+| sub‑grade AUC (resolved) | 0.68 | 0.69 | 0.70 |
+| mean recovery, principal basis | 0.382 | 0.366 | 0.341 |
+| recoveries / funded (charged off) | 0.084 | 0.075 | 0.071 |
 | fully paid with a late fee | 2.2% | 2.3% |
 | charged off without any payment | 0.9% | 1.0% |
 | months issue → last payment (charged off) | 16.1 | 13.8 |
