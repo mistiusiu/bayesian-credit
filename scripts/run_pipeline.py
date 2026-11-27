@@ -18,6 +18,7 @@ Outputs (``--out``, default ``data/runs/<timestamp>``)::
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import shutil
 import sys
@@ -31,6 +32,7 @@ try:
 except ImportError:  # running from a checkout without `pip install -e core`
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core"))
 
+import pandas as pd
 from bayesian_credit.config import FrameworkConfig, SimulationConfig
 from bayesian_credit.data import DEFAULT_SHIFT, DEFAULT_SHIFT_AT
 from bayesian_credit.pipeline import (
@@ -55,7 +57,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--train-end", default="2015-01-01")
     ap.add_argument("--start", default="2015-01-01")
-    ap.add_argument("--end", default="2018-12-31")
+    ap.add_argument("--end", default=None,
+                    help="last simulated day (default: end of the dataset's last issue month, "
+                         "2020-09-30 for the 2007-2020Q3 export, 2018-12-31 for synthetic)")
     ap.add_argument("--max-loans", type=int, default=50_000, help="loans streamed through the simulation")
     ap.add_argument("--policies", default="thompson,thompson_se,epsilon_greedy,ucb1,historical,random")
     ap.add_argument("--feedback-mode", choices=("simulated", "replay", "hybrid"), default="simulated")
@@ -336,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg.validate()
     sim_kwargs: dict[str, Any] = {
         "start": args.start,
-        "end": args.end,
+        "end": args.end or "2018-12-31",  # checked here, replaced by the dataset's range below
         "max_loans": args.max_loans,
         "seed": args.seed,
         "feedback_mode": args.feedback_mode,
@@ -362,6 +366,9 @@ def main(argv: list[str] | None = None) -> int:
         kw = {"max_rows": args.max_rows, "seed": args.seed, "order": "random"}
     df, ds = prepare_dataset(args.source, out / "dataset.parquet", cfg=cfg, **kw)
     cfg.data.snapshot_date = ds["snapshot_date"]  # the real file's own observation date
+    if args.end is None and ds.get("issue_max"):  # stream to the dataset's last issue month
+        sim_cfg = dataclasses.replace(sim_cfg, end=str((pd.Timestamp(ds["issue_max"]) + pd.offsets.MonthEnd(0)).date()))
+        sim_cfg.validate()
     timings["ingest"] = time.perf_counter() - t0
     print(f"[ingest] {len(df):,} loans in {timings['ingest']:.1f}s -> {ds['path']}", flush=True)
 
