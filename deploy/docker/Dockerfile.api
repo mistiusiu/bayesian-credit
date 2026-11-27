@@ -35,7 +35,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DJANGO_SETTINGS_MODULE=config.settings \
     DATA_ROOT=/app/data \
     ARTIFACT_ROOT=/app/data/artifacts \
-    LENDING_CLUB_PATH=/app/data/raw/accepted_2007_to_2018Q4.csv.gz
+    LENDING_CLUB_PATH=/app/data/raw/Loan_status_2007-2020Q3.csv
 
 RUN useradd --create-home --uid 10001 app
 WORKDIR /app
