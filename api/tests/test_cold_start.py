@@ -125,3 +125,46 @@ def test_cold_start_segmentation_validation(api, e2e, extra, field):
 def test_a_run_from_a_fit_keeps_the_fits_segmentation(api, e2e):
     r = _create(api, fit=e2e["fit"]["id"], cold_start=True, segmentation={"dimensions": ["grade"]})
     assert r.status_code == 400 and "segmentation" in r.json(), r.json()
+
+
+def test_resegmentation_respects_the_cap_and_order(api, e2e):
+    """A breaker that keeps tripping refines at most max_refinements times, in the given order."""
+    dims = ["purpose_group", "home_ownership"]
+    r = _create(
+        api,
+        dataset=e2e["dataset"]["id"],
+        cold_start=True,
+        segmentation={"dimensions": dims, "refinement_order": ["income_band", "dti_band"], "max_refinements": 1},
+        start="2015-01",
+        end="2016-12",
+        breaker_mode="auto_ack",
+        max_loans=None,  # enough borrowers per window for the Sentinel to evaluate
+        psi={"thresholds": {"watch": 0.001, "breaker": 0.002}, "auto_action": "resegment"},
+    )
+    assert r.status_code == 201, r.json()
+    sim = r.json()
+    assert sim["status"] == "completed", sim["job"]
+    from apps.simulations.models import Simulation
+
+    seg = Simulation.objects.get(pk=sim["id"]).framework["segmentation"]
+    assert seg["max_dimensions"] == 3 and seg["refinement_order"] == ["income_band", "dti_band"]
+    events = api.get(f"/api/v1/simulations/{sim['id']}/events/", {"type": "ResegmentationApplied", "limit": 500}).json()
+    rows = [e for e in events["results"] if e["type"] == "ResegmentationApplied"]
+    assert len(rows) >= 2, "the low thresholds should trip the breaker repeatedly"
+    assert rows[0]["payload"]["dimensions_after"] == [*dims, "income_band"]
+    assert all(e["payload"]["dimensions_after"] == [*dims, "income_band"] for e in rows[1:])  # capped
+
+
+@pytest.mark.parametrize(
+    "segmentation",
+    [
+        {"dimensions": ["grade"], "max_refinements": -1},
+        {"dimensions": ["grade"], "max_refinements": "two"},
+        {"dimensions": ["grade"], "refinement_order": ["zip_band"]},
+        {"dimensions": ["grade"], "refinement_order": ["dti_band", "dti_band"]},
+        {"dimensions": ["grade"], "colour": "red"},
+    ],
+)
+def test_refinement_settings_are_validated(api, e2e, segmentation):
+    r = _create(api, dataset=e2e["dataset"]["id"], cold_start=True, segmentation=segmentation)
+    assert r.status_code == 400 and "segmentation" in r.json(), r.json()

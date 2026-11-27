@@ -68,6 +68,13 @@ def apply_exclusions(attrs: dict, ds: Dataset, errors: dict[str, list[str]]) -> 
     hierarchy = dict(attrs.get("hierarchy") or {})
     if not excluded:
         return dims, hierarchy
+    order = (attrs.get("segmentation") or {}).get("refinement_order")
+    if isinstance(order, list):
+        gone = [d for d in order if d in DIMENSIONS and DIMENSIONS[d][0] in excluded]
+        if gone:
+            errors.setdefault("segmentation", []).append(
+                f"refinement_order: {', '.join(gone)} derive(s) from variables excluded from dataset #{ds.pk}."
+            )
     if dims:
         gone = [d for d in dims if d in DIMENSIONS and DIMENSIONS[d][0] in excluded]
         if gone:
@@ -94,19 +101,40 @@ def apply_exclusions(attrs: dict, ds: Dataset, errors: dict[str, list[str]]) -> 
     return dims, hierarchy
 
 
-def segmentation_block(dims: list[str] | None, ds: Dataset) -> dict | None:
-    """FrameworkConfig ``segmentation`` section for a dataset: the chosen dimensions plus a
-    refinement order without the dimensions whose source variable the dataset excluded, so a
-    breaker ``resegment`` never refines on a constant ``"unknown"`` column (``None`` = defaults)."""
+def segmentation_block(dims: list[str] | None, ds: Dataset, seg: dict | None = None) -> dict | None:
+    """FrameworkConfig ``segmentation`` section for a dataset: the chosen dimensions, the
+    refinement order a breaker ``resegment`` walks (the request's, else the default without the
+    dimensions whose source variable the dataset excluded, so it never refines on a constant
+    ``"unknown"`` column) and ``max_dimensions`` = dimensions + ``max_refinements`` when the
+    request caps it (``None`` = all defaults)."""
+    seg = seg or {}
     excluded = set((ds.params or {}).get("exclude_variables") or [])
-    if not dims and not excluded:
+    order = seg.get("refinement_order")
+    cap = seg.get("max_refinements")
+    if not dims and not excluded and order is None and cap is None:
         return None
     block: dict = {"dimensions": list(dims or SegmentationConfig().dimensions)}
-    if excluded:
+    if order is not None:
+        block["refinement_order"] = list(order)
+    elif excluded:
         block["refinement_order"] = [
             d for d in SegmentationConfig().refinement_order if DIMENSIONS[d][0] not in excluded
         ]
+    if cap is not None:
+        block["max_dimensions"] = len(block["dimensions"]) + int(cap)
     return block
+
+
+SEGMENTATION_KEYS = {"dimensions", "refinement_order", "max_refinements"}
+
+
+def _distinct_dimensions(value, *, allow_empty: bool) -> bool:
+    return (
+        isinstance(value, list)
+        and (allow_empty or bool(value))
+        and all(d in DIMENSIONS for d in value)
+        and len(set(value)) == len(value)
+    )
 
 
 def validate_sections(attrs: dict) -> dict[str, list[str]]:
@@ -128,14 +156,18 @@ def validate_sections(attrs: dict) -> dict[str, list[str]]:
             err(section, f"unknown key(s): {', '.join(unknown)}")
     seg = attrs.get("segmentation")
     if seg is not None:
-        dims = seg.get("dimensions") if isinstance(seg, dict) else None
-        if (
-            not isinstance(dims, list)
-            or not dims
-            or any(d not in DIMENSIONS for d in dims)
-            or len(set(dims)) != len(dims)
-        ):
-            err("segmentation", "Choose one or more distinct supported dimensions.")
+        if not isinstance(seg, dict) or set(seg) - SEGMENTATION_KEYS:
+            unknown = sorted(set(seg) - SEGMENTATION_KEYS) if isinstance(seg, dict) else []
+            err("segmentation", f"unknown key(s): {', '.join(unknown)}" if unknown else "Must be an object.")
+        else:
+            dims = seg.get("dimensions", ...)
+            if dims is not ... and not _distinct_dimensions(dims, allow_empty=False):
+                err("segmentation", "Choose one or more distinct supported dimensions.")
+            if "refinement_order" in seg and not _distinct_dimensions(seg["refinement_order"], allow_empty=True):
+                err("segmentation", "refinement_order must be distinct supported dimensions.")
+            cap = seg.get("max_refinements")
+            if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int) or not 0 <= cap <= 10):
+                err("segmentation", "max_refinements must be an integer in [0, 10] or null.")
     arm = attrs.get("arm_space") or {}
     if "amounts" in arm and not (
         isinstance(arm["amounts"], list) and arm["amounts"] and all((_number(x) or 0) > 0 for x in arm["amounts"])
@@ -208,7 +240,11 @@ class FitCreateSerializer(serializers.Serializer):
 
     dataset = serializers.IntegerField()
     name = serializers.CharField(max_length=200)
-    segmentation = serializers.JSONField(required=False, help_text="{dimensions: SegmentationDimension[]}")
+    segmentation = serializers.JSONField(
+        required=False,
+        help_text="{dimensions: SegmentationDimension[], refinement_order?: SegmentationDimension[], "
+        "max_refinements?: int} (refinement_order / max_refinements govern a breaker resegment)",
+    )
     arm_space = serializers.JSONField(required=False, help_text="Partial ArmSpaceConfig")
     hierarchy = serializers.JSONField(required=False, help_text="Partial HierarchyConfig (kappa_* may be 'auto')")
     recovery = serializers.JSONField(required=False, help_text="Partial RecoveryConfig")
@@ -256,7 +292,7 @@ class FitCreateSerializer(serializers.Serializer):
             "data": data,
             "train_end": epoch_start(train_end),
         }
-        seg = segmentation_block(dims, ds)
+        seg = segmentation_block(dims, ds, attrs.get("segmentation"))
         if seg:
             raw["segmentation"] = seg
         try:

@@ -79,6 +79,25 @@ def test_ablated_dataset_fit_and_simulation(api):
         format="json",
     )
     assert cold.status_code == 400 and "fico_band" in " ".join(cold.json()["segmentation"])
+    capped = api.post(
+        "/api/v1/fits/",
+        {"dataset": ds["id"], "name": "capped", "train_end": "2016-01",
+         "segmentation": {"dimensions": ["purpose_group", "income_band"], "max_refinements": 2,
+                          "refinement_order": ["dti_band", "emp_band", "verification_status"]}},
+        format="json",
+    )
+    assert capped.status_code == 201, capped.json()
+    capped = capped.json()
+    assert capped["config"]["segmentation"]["max_refinements"] == 2
+    assert capped["config"]["segmentation"]["refinement_order"] == ["dti_band", "emp_band", "verification_status"]
+    assert Fit.objects.get(pk=capped["id"]).framework["segmentation"]["max_dimensions"] == 4
+    bad_order = api.post(
+        "/api/v1/fits/",
+        {"dataset": ds["id"], "name": "bad order",
+         "segmentation": {"dimensions": ["purpose_group"], "refinement_order": ["fico_band"]}},
+        format="json",
+    )
+    assert bad_order.status_code == 400 and "fico_band" in " ".join(bad_order.json()["segmentation"])
 
     bad_psi = api.post(
         "/api/v1/simulations/",

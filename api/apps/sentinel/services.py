@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
+from bayesian_credit.config import SegmentationConfig
 from bayesian_credit.data.segmentation import Segmenter
 from bayesian_credit.simulation.store import RunDirectory
 from django.db import IntegrityError, transaction
@@ -39,9 +40,12 @@ def _segmentation_before(sim: Simulation, rec: dict[str, Any]) -> list[str]:
     return sim.segmentation_dimensions
 
 
-def _refined(dims: list[str]) -> list[str] | None:
+def _refined(sim: Simulation, dims: list[str]) -> list[str] | None:
+    """What a ``resegment`` would refine ``dims`` to under the run's refinement order and cap."""
+    seg = sim.framework_dict.get("segmentation") or {}
     try:
-        return list(Segmenter(dims).refine().dimensions)
+        order = seg["refinement_order"] if "refinement_order" in seg else SegmentationConfig().refinement_order
+        return list(Segmenter(dims, order, seg.get("max_dimensions")).refine().dimensions)
     except Exception:  # noqa: BLE001 - informative only
         return None
 
@@ -92,7 +96,7 @@ def sync_reviews(sim: Simulation) -> list[Review]:
         before = _segmentation_before(sim, rec)
         after = rec.get("segmentation_after") or rec.get("dimensions_after")
         if not after and action == "resegment":
-            after = _refined(before)
+            after = _refined(sim, before)
         values = {
             "epoch": to_epoch(rec.get("epoch")) or str(rec.get("epoch") or ""),
             "created_at": _record_created_at(rd, rec),
@@ -158,7 +162,7 @@ def acknowledge(review: Review, action: str, note: str, by: str = "researcher") 
     review.auto = False
     review.breaker_state = "half_open"
     if action == Review.Action.RESEGMENT:
-        review.segmentation_after = _refined(list(review.segmentation_before or []))
+        review.segmentation_after = _refined(review.simulation, list(review.segmentation_before or []))
     review.save(
         update_fields=[
             "status",

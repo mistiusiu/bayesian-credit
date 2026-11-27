@@ -258,10 +258,23 @@ class SegmentationConfig(ConfigMixin):
         "application_type",
         "sub_grade",
     )
+    #: Most dimensions a breaker ``resegment`` may refine up to (``None`` = no cap). Each
+    #: refinement multiplies the groups every contextual policy tracks, so an uncapped run
+    #: whose breaker keeps tripping ends up with nearly one group per borrower.
+    max_dimensions: int | None = None
 
     def __post_init__(self) -> None:
         self.dimensions = tuple(self.dimensions)
         self.refinement_order = tuple(self.refinement_order)
+
+    def validate(self) -> None:
+        if not self.dimensions:
+            raise ConfigurationError("segmentation needs at least one dimension")
+        if self.max_dimensions is not None and self.max_dimensions < len(self.dimensions):
+            raise ConfigurationError(
+                f"segmentation.max_dimensions ({self.max_dimensions}) is below the "
+                f"{len(self.dimensions)} starting dimensions"
+            )
 
 
 @dataclass

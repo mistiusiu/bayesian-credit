@@ -139,7 +139,15 @@ def contract_config(framework: FrameworkConfig, train_end_epoch: str) -> dict[st
     h, r, m, w, a = framework.hierarchy, framework.recovery, framework.mctm, framework.reward, framework.arms
     return clean(
         {
-            "segmentation": {"dimensions": list(framework.segmentation.dimensions)},
+            "segmentation": {
+                "dimensions": list(framework.segmentation.dimensions),
+                "refinement_order": list(framework.segmentation.refinement_order),
+                "max_refinements": (
+                    None
+                    if framework.segmentation.max_dimensions is None
+                    else framework.segmentation.max_dimensions - len(framework.segmentation.dimensions)
+                ),
+            },
             "arm_space": {
                 "amounts": [float(x) for x in a.amounts],
                 "rates": [float(x) for x in a.rates],

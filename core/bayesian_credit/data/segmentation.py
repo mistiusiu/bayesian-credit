@@ -87,6 +87,7 @@ class Segmenter:
         self,
         dimensions: Sequence[str],
         refinement_order: Sequence[str] = SegmentationConfig().refinement_order,
+        max_dimensions: int | None = None,
     ):
         dims = tuple(dimensions)
         if not dims:
@@ -100,10 +101,11 @@ class Segmenter:
                 raise LeakageError(f"dimension {d} derives from non pre-decision column {src}")
         self.dimensions = dims
         self.refinement_order = tuple(refinement_order)
+        self.max_dimensions = None if max_dimensions is None else int(max_dimensions)
 
     @classmethod
     def from_config(cls, cfg: SegmentationConfig) -> Segmenter:
-        return cls(cfg.dimensions, cfg.refinement_order)
+        return cls(cfg.dimensions, cfg.refinement_order, cfg.max_dimensions)
 
     # ----- derivation -----------------------------------------------------------------
     def derive(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -133,25 +135,35 @@ class Segmenter:
 
     # ----- human-in-the-loop re-segmentation ------------------------------------------
     def refine(self) -> Segmenter:
-        """Append the next unused dimension from ``refinement_order`` (finer groups)."""
+        """Append the next unused dimension from ``refinement_order`` (finer groups); ``self``
+        once the order is exhausted or ``max_dimensions`` is reached."""
+        cap = getattr(self, "max_dimensions", None)  # pickles from before the cap lack it
+        if cap is not None and len(self.dimensions) >= cap:
+            return self  # capped
         for d in self.refinement_order:
             if d not in self.dimensions:
-                return Segmenter((*self.dimensions, d), self.refinement_order)
+                return Segmenter((*self.dimensions, d), self.refinement_order, cap)
         return self  # nothing left to refine
 
     def coarsen(self) -> Segmenter:
         """Drop the last dimension (coarser groups); never below one dimension."""
         if len(self.dimensions) == 1:
             return self
-        return Segmenter(self.dimensions[:-1], self.refinement_order)
+        return Segmenter(self.dimensions[:-1], self.refinement_order, getattr(self, "max_dimensions", None))
 
     # ----- serialisation ---------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
-        return {"dimensions": list(self.dimensions), "refinement_order": list(self.refinement_order)}
+        return {
+            "dimensions": list(self.dimensions),
+            "refinement_order": list(self.refinement_order),
+            "max_dimensions": getattr(self, "max_dimensions", None),
+        }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Segmenter:
-        return cls(d["dimensions"], d.get("refinement_order", SegmentationConfig().refinement_order))
+        return cls(
+            d["dimensions"], d.get("refinement_order", SegmentationConfig().refinement_order), d.get("max_dimensions")
+        )
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Segmenter) and other.dimensions == self.dimensions

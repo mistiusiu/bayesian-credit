@@ -103,6 +103,24 @@ class TestRefineCoarsen:
         seg = Segmenter(["grade"], refinement_order=("grade",))
         assert seg.refine() is seg
 
+    def test_max_dimensions_caps_refinement(self, segmenter):
+        capped = Segmenter(segmenter.dimensions, segmenter.refinement_order, max_dimensions=5)
+        twice = capped.refine().refine()
+        assert twice.dimensions == (*segmenter.dimensions, "fico_band", "dti_band")
+        assert twice.refine() is twice  # the cap holds however often the breaker trips
+        assert twice.max_dimensions == 5 and twice.coarsen().max_dimensions == 5
+
+    def test_max_dimensions_round_trips(self):
+        seg = Segmenter(["grade"], ("dti_band",), max_dimensions=2)
+        back = Segmenter.from_dict(seg.to_dict())
+        assert back.max_dimensions == 2 and back.refinement_order == ("dti_band",)
+        assert Segmenter.from_dict({"dimensions": ["grade"]}).max_dimensions is None  # older files
+        assert Segmenter.from_config(SegmentationConfig(max_dimensions=4)).max_dimensions == 4
+
+    def test_max_dimensions_below_the_start_is_rejected(self):
+        with pytest.raises(ConfigurationError, match="max_dimensions"):
+            SegmentationConfig(max_dimensions=2).validate()
+
     def test_coarsen_is_inverse_of_refine(self, segmenter):
         assert segmenter.refine().coarsen() == segmenter
         assert segmenter.coarsen().dimensions == ("grade", "purpose_group")

@@ -463,8 +463,16 @@ export interface RewardConfig {
 }
 
 /** Fully resolved fit configuration (server defaults applied). */
+export type SegmentationSettings = {
+  dimensions: SegmentationDimension[];
+  /** Dimensions a breaker `resegment` adds, in order (default: fico_band, dti_band, income_band, emp_band, verification_status, application_type, sub_grade, minus excluded variables). */
+  refinement_order?: SegmentationDimension[];
+  /** Most dimensions a resegment may add; null = no cap. */
+  max_refinements?: number | null;
+};
+
 export interface FitConfig {
-  segmentation: { dimensions: SegmentationDimension[] };
+  segmentation: SegmentationSettings;
   arm_space: ArmSpaceConfig;
   hierarchy: HierarchyConfig;
   recovery: RecoveryConfig;
@@ -478,7 +486,7 @@ export interface FitConfig {
 export interface FitCreate {
   dataset: Id;
   name: string;
-  segmentation?: { dimensions: SegmentationDimension[] };
+  segmentation?: SegmentationSettings;
   arm_space?: Partial<ArmSpaceConfig>;
   hierarchy?: Partial<Omit<HierarchyConfig, 'policy_effect_cfg'>> & { policy_effect_cfg?: Partial<PolicyEffectConfig> };
   recovery?: Partial<RecoveryConfig>;
@@ -1177,7 +1185,7 @@ export interface SimulationCreate {
   dataset?: Id | null;
   cold_start?: boolean;
   /** Cold start without a fit only: groups of the replay world and the policies (default: the dataset's default dimensions). 400 with a fit. */
-  segmentation?: { dimensions: SegmentationDimension[] } | null;
+  segmentation?: SegmentationSettings | null;
   name: string;
   policies: PolicyName[];
   feedback_mode?: FeedbackMode;
