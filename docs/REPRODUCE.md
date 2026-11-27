@@ -24,7 +24,7 @@ hosts the API:
 | Subsets | All variables; No FICO (4 FICO fields removed); No FICO, no LC grade (+ grade, sub_grade); Thin file (+ 25 credit-report fields) |
 | Segmentation | purpose × home ownership × income band, plus grade where kept, plus FICO band in "All". Breaker resegmentation adds at most 2 dimensions, from DTI band, employment band, verification, application type (FICO band first in "All") |
 | Warm fit | trained on loans issued before 2013-06 (six years) |
-| Bandit lab | 2013-06 .. 2020-09 (88 months), all 7 policies (Thompson, Thompson σ/√n, UCB1, ε-greedy, Greedy, Historical, Random), hybrid feedback (interim 12 months, weight 0.5), seed 42; pilot streams 50,000 borrowers, full the number in `SCALES["full"]` |
+| Bandit lab | 2013-06 .. 2020-09 (88 months), all 7 policies (Thompson, Thompson σ/√n, UCB1, ε-greedy, Greedy, Historical, Random), hybrid feedback (interim 12 months, weight 0.5), seed 42; pilot streams 50,000 borrowers, full every borrower of the window (about 2.7 million), month by month (docs/SIMULATION.md §1 "Streaming") |
 | Cold run | fit-less cold start with the same segmentation; its replay world is fitted on the pre-2013-06 loans, never the warm fit's |
 | PSI Sentinel | the pre-decision variables recorded throughout the window (22 / 20 / 18 / 8 per subset; fields Lending Club only started reporting in 2012 or 2016 would read as drift), 3-month window, watch 0.10, breaker 0.25, aggregate max; trips auto-acknowledged with `resegment` |
 | Checkpoints | every 6 months (pilot) or 12 (full); they do not change results |
@@ -61,10 +61,11 @@ Measured on a 16 GB / 12-thread laptop (worker 9 GiB, 10 CPUs):
 | Pilot, all variables | 3.5–4 min | 6 GB (the most groups) |
 | Full dataset: ingest, fit | 15–30 s each | 2.4–5.2 GB |
 
-Memory grows with the number of borrower groups and of borrowers streamed: the setup holds the
-whole dataset, the streamed loans with their eligibility matrix (borrowers × 129 arms) and the
-hindsight model. Streaming all 2.7 million borrowers of the window does not fit in 9 GiB (the
-worker is stopped before the first month), which is why the full scale streams a sample.
+The replay streams the window month by month (each month's applications are read from the
+dataset when that month is processed), so memory is set by the loaded dataset, the pending
+delayed feedback and the policies' borrower groups rather than by the number of borrowers;
+the richest segmentation ("All variables") is the heaviest. `--sim-loans N` streams a seeded
+sample instead (recorded in the manifest) if a machine is smaller.
 
 ## Checking a reproduction
 
