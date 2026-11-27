@@ -42,6 +42,8 @@ export function FitForm({ datasetId, excluded = [], onCreated }: { datasetId: nu
   const [lambda, setLambda] = useState<number | null>(0);
   const [lendable, setLendable] = useState<number | null>(0.6);
   const [trainEnd, setTrainEnd] = useState('2015-01');
+  // each breaker resegment adds a dimension; without a cap a drifting run ends near one group per borrower
+  const [maxRefinements, setMaxRefinements] = useState<number | null>(2);
   const create = useCreateFit();
   const errs = create.error instanceof ApiError ? create.error.fieldErrors : {};
 
@@ -53,7 +55,7 @@ export function FitForm({ datasetId, excluded = [], onCreated }: { datasetId: nu
       {
         dataset: datasetId,
         name: name.trim() || `${dims.join(' × ')} · ${structure}`,
-        segmentation: { dimensions: dims },
+        segmentation: { dimensions: dims, max_refinements: maxRefinements },
         arm_space: {
           amounts: parseAmounts(arms.amounts).values,
           rates: parseRates(arms.rates).values,
@@ -84,12 +86,15 @@ export function FitForm({ datasetId, excluded = [], onCreated }: { datasetId: nu
   return (
     <Disclosure title="New fit" subtitle="Two-Stage Beta-Beta + MCTM on the selected dataset (background job)">
       <form onSubmit={submit} className="space-y-4" noValidate>
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem]">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_12rem]">
           <Field label="Name" error={errs.name}>
             {(id, d) => <TextInput id={id} aria-describedby={d} value={name} placeholder="auto" onChange={(e) => setName(e.target.value)} />}
           </Field>
           <Field label="Train end (exclusive)" hint="fit on issue_d < this month" error={errs.train_end}>
             {(id, d, inv) => <TextInput id={id} aria-describedby={d} aria-invalid={inv} value={trainEnd} onChange={(e) => setTrainEnd(e.target.value)} />}
+          </Field>
+          <Field label="Resegment adds at most" hint="dimensions; blank = no cap">
+            {(id, d) => <NumberInput id={id} aria-describedby={d} min={0} max={10} value={maxRefinements} onValue={setMaxRefinements} />}
           </Field>
         </div>
         <div className="flex flex-col gap-1.5">

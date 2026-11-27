@@ -159,7 +159,8 @@ function createFit(raw: unknown, now: number) {
   e.check(epochOk(trainEnd) && trainEnd > (range.issue_from ?? '2012-01') && trainEnd <= (range.issue_to ?? issueMaxOf(range.source)), 'train_end', 'Must be a YYYY-MM inside the dataset issue range.');
   e.throwIfAny();
   const id = db.next.fit++;
-  const config: FitConfig = { segmentation: { dimensions: seg }, arm_space: arm, hierarchy: hier, recovery, mctm, reward, train_end: trainEnd };
+  const cap = isObj(b.segmentation) ? num(b.segmentation.max_refinements) : null;
+  const config: FitConfig = { segmentation: { dimensions: seg, max_refinements: cap },  arm_space: arm, hierarchy: hier, recovery, mctm, reward, train_end: trainEnd };
   const job = newJob('fit', { type: 'fit', id }, now + 500, 6500);
   const rec: FitRec = { id, name, datasetId: ds.id, config, createdMs: now, jobId: job.id, fitSeconds: 33 + (id % 7) * 1.7 };
   db.fits.set(id, rec);

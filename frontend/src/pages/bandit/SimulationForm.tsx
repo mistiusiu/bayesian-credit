@@ -58,6 +58,7 @@ export function SimulationForm({
   const dimOptions = SEGMENTATION_DIMENSIONS.filter((d) => !excluded.includes(d.source));
   const [dimsState, setDims] = useState<SegmentationDimension[]>(DEFAULT_FIT_CONFIG.segmentation.dimensions);
   const dims = dimsState.filter((d) => dimOptions.some((o) => o.key === d));
+  const [maxRefinements, setMaxRefinements] = useState<number | null>(2);
   const setKnowledge = (k: Knowledge) => {
     setKnowledgeState(k);
     setPolicies(k === 'cold' ? COLD_POLICIES : WARM_POLICIES);
@@ -94,7 +95,7 @@ export function SimulationForm({
       {
         ...(useFit ? { fit: fitId } : { dataset: datasetId }),
         cold_start: cold,
-        ...(useFit ? {} : { segmentation: { dimensions: dims } }),
+        ...(useFit ? {} : { segmentation: { dimensions: dims, max_refinements: maxRefinements } }),
         name: name.trim() || `${cold ? 'Cold start · ' : ''}${policies.map((p) => policyLabel(p)).join(' vs ')} · ${feedback}`,
         policies,
         feedback_mode: feedback,
@@ -145,6 +146,11 @@ export function SimulationForm({
             <span className="text-xs font-medium text-ink-2">Segmentation of the replay world (borrower group g)</span>
             <Chips<SegmentationDimension> label="Segmentation dimensions" options={dimOptions.map((d) => ({ value: d.key, label: d.label, title: `derived from ${d.source}` }))} value={dims} onChange={setDims} />
             {errs.segmentation && <p className="text-2xs text-delta-bad">{errs.segmentation.join(' ')}</p>}
+            <div className="w-56">
+          <Field label="Resegment adds at most" hint="dimensions; blank = no cap">
+            {(id, d) => <NumberInput id={id} aria-describedby={d} min={0} max={10} value={maxRefinements} onValue={setMaxRefinements} />}
+          </Field>
+            </div>
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
