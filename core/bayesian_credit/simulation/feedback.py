@@ -16,6 +16,13 @@ sort chronologically. Within a bucket, items keep their insertion order, so
 resume. :meth:`schedule` / :meth:`pop_due` speak :class:`FeedbackItem`; the runner uses
 the columnar twins :meth:`schedule_batch` / :meth:`pop_due_batch`.
 
+Memory. At production scale millions of items are pending at once, so the queue stores the
+repetitive object columns (``policy``, ``group``, ``decision_epoch``) as ``int32`` codes into
+per-queue name tables (:data:`ENCODED_COLUMNS`); they are decoded on the way out, so every
+public method sees and returns the same values as before. Chunk arrays are never modified in
+place (releasing detaches whole chunks), which lets :meth:`DelayedFeedbackQueue.to_dict`
+reference them instead of copying.
+
 The decision attached to an item is stored in its *replayable* form only (``arm``,
 ``group``, ``policy_name``, ``fallback`` and ``meta["seg_version"]``): exactly what
 ``Policy.update`` reads, without the per-arm score vector.
@@ -29,10 +36,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from ..types import FeedbackKind
 
 __all__ = [
+    "ENCODED_COLUMNS",
     "KIND_CODES",
     "QUEUE_COLUMNS",
     "DelayedFeedbackQueue",
@@ -62,6 +71,8 @@ QUEUE_COLUMNS: dict[str, Any] = {
     "match": np.bool_,
     "decision_epoch": object,
 }
+#: Object columns stored as int32 codes into the queue's name tables.
+ENCODED_COLUMNS = ("policy", "group", "decision_epoch")
 _DEFAULTS: dict[str, Any] = {
     "row": -1,
     "seg_version": -1,
@@ -255,9 +266,23 @@ def _as_column(name: str, value: Any, n: int) -> np.ndarray:
     return arr
 
 
-def _concat(chunks: Sequence[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
+def _all_same(values: np.ndarray) -> bool:
+    first = values[0]
+    if first is None:
+        return all(v is None for v in values.tolist())
+    try:
+        return bool(np.all(values == first))
+    except (TypeError, ValueError):  # pragma: no cover - exotic objects
+        return False
+
+
+def _concat(chunks: Sequence[dict[str, np.ndarray]], encoded: bool = False) -> dict[str, np.ndarray]:
     if not chunks:
-        return _empty_columns()
+        cols = _empty_columns()
+        if encoded:
+            for name in ENCODED_COLUMNS:
+                cols[name] = np.empty(0, dtype=np.int32)
+        return cols
     if len(chunks) == 1:
         return dict(chunks[0])
     return {c: np.concatenate([ch[c] for ch in chunks]) for c in QUEUE_COLUMNS}
@@ -287,20 +312,65 @@ class DelayedFeedbackQueue:
         self._n = 0
         self._by_kind: dict[str, int] = {k.value: 0 for k in FeedbackKind}
         self._by_policy: dict[str, int] = {}
+        self._names: dict[str, list[Any]] = {c: [] for c in ENCODED_COLUMNS}
+        self._codes: dict[str, dict[Any, int]] = {c: {} for c in ENCODED_COLUMNS}
+
+    # ----- encoding of the object columns ----------------------------------------------------------
+    def _encode(self, name: str, values: np.ndarray) -> np.ndarray:
+        """``values`` (object array) -> int32 codes into ``self._names[name]``. The name table
+        keeps the original objects (``None`` stays ``None``), so decoding is exact."""
+        codes_of, names = self._codes[name], self._names[name]
+        if values.size == 0:
+            return np.empty(0, dtype=np.int32)
+        if _all_same(values):  # the runner's policy / decision_epoch columns
+            reps = [values[0]]
+            local = np.zeros(values.size, dtype=np.int64)
+        else:
+            local = pd.factorize(values, use_na_sentinel=False)[0]
+            _, first = np.unique(local, return_index=True)
+            reps = values[first].tolist()
+        mapped = np.empty(len(reps), dtype=np.int32)
+        for j, v in enumerate(reps):
+            code = codes_of.get(v)
+            if code is None:
+                code = codes_of[v] = len(names)
+                names.append(v)
+            mapped[j] = code
+        return mapped[local]
+
+    def _decode(self, chunk: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        out = dict(chunk)
+        for name in ENCODED_COLUMNS:
+            table = np.empty(len(self._names[name]), dtype=object)
+            table[:] = self._names[name]
+            out[name] = table[chunk[name]] if chunk[name].size else np.empty(0, dtype=object)
+        return out
+
+    def _encode_chunk(self, chunk: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        out = dict(chunk)
+        for name in ENCODED_COLUMNS:
+            out[name] = self._encode(name, np.asarray(chunk[name], dtype=object))
+        return out
 
     # ----- bookkeeping ---------------------------------------------------------------------
-    @staticmethod
-    def _policy_counts(chunk: dict[str, np.ndarray]) -> dict[str, int]:
-        pol = chunk["policy"]
+    def _policy_counts(self, chunk: dict[str, np.ndarray]) -> dict[str, int]:
+        pol = chunk["policy"]  # int32 codes
+        names = self._names["policy"]
         if pol.size and bool(np.all(pol == pol[0])):  # the runner schedules one policy per chunk
-            return {str(pol[0]): int(pol.size)}
-        names, counts = np.unique(pol.astype(str), return_counts=True)
-        return {str(n): int(c) for n, c in zip(names.tolist(), counts.tolist(), strict=True)}
+            return {str(names[int(pol[0])]): int(pol.size)}
+        codes, counts = np.unique(pol, return_counts=True)
+        out: dict[str, int] = {}
+        for c, k in zip(codes.tolist(), counts.tolist(), strict=True):
+            key = str(names[c])
+            out[key] = out.get(key, 0) + int(k)
+        return dict(sorted(out.items()))
 
-    def _add_chunk(self, epoch: str, chunk: dict[str, np.ndarray]) -> None:
+    def _add_chunk(self, epoch: str, chunk: dict[str, np.ndarray], encoded: bool = False) -> None:
         n = _chunk_len(chunk)
         if n == 0:
             return
+        if not encoded:
+            chunk = self._encode_chunk(chunk)
         bucket = self._buckets.get(epoch)
         if bucket is None:
             self._buckets[epoch] = bucket = []
@@ -385,7 +455,7 @@ class DelayedFeedbackQueue:
                 releases.append(np.full(_chunk_len(chunk), key, dtype=object))
         if not chunks:
             return FeedbackBatch(_empty_columns(), np.empty(0, dtype=object))
-        return FeedbackBatch(_concat(chunks), np.concatenate(releases))
+        return FeedbackBatch(self._decode(_concat(chunks, encoded=True)), np.concatenate(releases))
 
     def pop_due(self, epoch: str) -> list[FeedbackItem]:
         """Remove and return every item with ``release_epoch <= epoch`` (FIFO per epoch)."""
@@ -416,7 +486,7 @@ class DelayedFeedbackQueue:
         key = epoch if epoch is not None else self.next_release()
         if key is None or key not in self._buckets:
             return []
-        cols = _concat([ch for ch, _ in self._buckets[key]])
+        cols = self._decode(_concat([ch for ch, _ in self._buckets[key]], encoded=True))
         return FeedbackBatch(cols, np.full(_chunk_len(cols), key, dtype=object)).items()
 
     def clear(self) -> None:
@@ -424,23 +494,31 @@ class DelayedFeedbackQueue:
 
     # ----- serialisation ---------------------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
-        """Plain dict for checkpoints: ``{"version", "buckets": {epoch: {column: ndarray}}}``.
+        """Plain dict for checkpoints (version 2): ``{"version", "n", "names": {column: [...]},
+        "buckets": {epoch: [chunk, ...]}}`` with the encoded columns as int32 codes.
 
-        Chunks of a bucket are concatenated (order preserved). Arrays are copies, so the
-        snapshot is independent of later queue mutations.
+        The chunk arrays are referenced, not copied - they are never modified in place, so
+        the snapshot is still independent of later queue mutations - and only the small name
+        tables are copied. Version 1 (one decoded column dict per epoch) is still read.
         """
         return {
-            "version": 1,
+            "version": 2,
             "n": self._n,
-            "buckets": {
-                k: {c: v.copy() for c, v in _concat([ch for ch, _ in self._buckets[k]]).items()}
-                for k in sorted(self._buckets)
-            },
+            "names": {c: list(v) for c, v in self._names.items()},
+            "buckets": {k: [dict(ch) for ch, _ in self._buckets[k]] for k in sorted(self._buckets)},
         }
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> DelayedFeedbackQueue:
         q = cls()
+        if int(d.get("version", 1)) >= 2:
+            for name in ENCODED_COLUMNS:
+                q._names[name] = list(d["names"][name])
+                q._codes[name] = {v: i for i, v in enumerate(q._names[name])}
+            for key in sorted(d.get("buckets", {})):
+                for raw in d["buckets"][key]:
+                    q._add_chunk(str(key), dict(raw), encoded=True)
+            return q
         for key in sorted(d.get("buckets", {})):
             raw = d["buckets"][key]
             n = int(np.asarray(raw["kind"]).size)
@@ -453,7 +531,7 @@ class DelayedFeedbackQueue:
         """Every pending item as a JSON-able dict (debugging / small queues)."""
         out = []
         for key in sorted(self._buckets):
-            cols = _concat([ch for ch, _ in self._buckets[key]])
+            cols = self._decode(_concat([ch for ch, _ in self._buckets[key]], encoded=True))
             out += [it.to_dict() for it in FeedbackBatch(cols, np.full(_chunk_len(cols), key, dtype=object))]
         return out
 

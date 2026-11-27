@@ -28,6 +28,14 @@ Django API relies on, and the resume / pause / review semantics.
   `(issue_d, loan_id)`.
 * **Epochs** – the sorted distinct issue months of the stream (`'YYYY-MM'`). An epoch's
   arrivals are the stream loans issued that month.
+* **Streaming** – the stream is never held as one frame. The runner keeps an index into the
+  dataset (`stream_rows`) and a few compact per-borrower arrays (loan id, historical arm,
+  realised reward, hindsight group and oracle, feedback timing); each epoch's contexts,
+  guardrail eligibility, PSI window and interim repayment plan are read from that month's
+  rows when the epoch is processed, as a production system reads each month's applications.
+  Group keys under a refined segmentation are derived per row on first use. All of these
+  are per-row functions, so a streamed run is bit-identical to building everything up front;
+  memory grows with the pending feedback and the policies' groups, not with the stream.
 
 ## 2. One epoch
 
@@ -333,6 +341,15 @@ and ~120k terminal observations and ~12 s their `select()` calls; the environmen
 valuation, queue and I/O take the rest. Peak RSS of the real-data run (~2 GB) is set by the
 loader's DuckDB scan of the parquet cache (2.93M rows for the 2007–2020Q3 export); the
 modelling stages stay around 1 GB.
+
+**Memory at production scale.** Besides streaming the stream (§1): the dataset parquet is
+loaded without keeping Arrow's copy and the freed buffers are returned to the OS
+(`LendingClubLoader.from_parquet`, about 2 GB less resident for the full export); the delayed
+feedback queue stores policy, group and decision epoch as int32 codes; the breaker's champion
+snapshot and checkpoints hold arm sets as numpy arrays (`snapshot(compact=True)`) rather than
+JSON lists; and checkpoints are pickled straight into the file. On the pilot's heaviest run
+(all variables, cold, 50k borrowers, 7 trips) peak memory fell from 6.1 to 4.0 GB with
+bit-identical outputs.
 
 ## 10. Known modelling caveat (and what was done about it)
 

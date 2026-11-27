@@ -54,6 +54,8 @@ from typing import Any, Literal
 import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from ..config import DataConfig
 from ..exceptions import DataSourceError
@@ -303,6 +305,21 @@ def subsample(df: pd.DataFrame, fraction: float, seed: int = 42) -> pd.DataFrame
         raise DataSourceError("fraction must be in (0, 1]")
     keep = sample_bucket(df[ID_COLUMN].to_numpy(), seed) < int(round(fraction * HASH_BUCKETS))
     return df.loc[keep].reset_index(drop=True)
+
+
+def release_memory() -> None:
+    """Hand freed heap memory back to the OS: Arrow's buffer pool and glibc's malloc arenas
+    keep freed blocks resident otherwise (best effort; a no-op where unsupported)."""
+    import ctypes
+    import ctypes.util
+    import gc
+
+    gc.collect()
+    pa.default_memory_pool().release_unused()
+    try:
+        ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):  # not glibc (macOS, musl)
+        pass
 
 
 def default_lending_club_path() -> Path:
@@ -721,11 +738,20 @@ class LendingClubLoader:
         p = Path(path)
         if not p.is_file():
             raise DataSourceError(f"parquet file not found: {p}")
-        df = pd.read_parquet(p, engine="pyarrow")
+        # Arrow -> pandas without holding both copies (self_destruct frees each column as it
+        # is converted), then hand the freed buffers back to the OS: a full 2.9M-loan table
+        # otherwise leaves ~2 GB of resident memory behind after loading.
+        table = pq.read_table(p)
+        df = table.to_pandas(self_destruct=True, split_blocks=True)
+        del table
         if columns is None:
             retained = [c for c in CANONICAL_COLUMNS if c in df.columns]
-            return canonicalize(df, retained, keep_extra=True)
-        return canonicalize(df, columns)
+            out = canonicalize(df, retained, keep_extra=True)
+        else:
+            out = canonicalize(df, columns)
+        del df
+        release_memory()
+        return out
 
     # ----- description ------------------------------------------------------------------
     def describe_source(self, count_rows: bool = True) -> dict[str, Any]:

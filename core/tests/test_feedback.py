@@ -127,6 +127,26 @@ def test_to_dict_snapshot_is_independent_of_later_mutation():
     assert [i.loan_id for i in restored.pop_due("2015-02")] == [1]
 
 
+def test_version_1_checkpoints_still_load_and_the_queue_stays_compact():
+    q = DelayedFeedbackQueue()
+    for i in range(30):
+        q.schedule(item(f"2015-0{1 + i % 3}", i, policy=f"p{i % 2}", arm=i % 7))
+    q.schedule_batch("2015-02", kind=np.zeros(3, dtype=np.int8), policy="p0", loan_id=np.arange(100, 103),
+                     arm=np.ones(3), group=np.array(["A|x", "B|y", "A|x"], dtype=object))
+    # the pre-compaction layout: one decoded column dict per epoch
+    v1 = {"version": 1, "n": len(q), "buckets": {}}
+    drain = DelayedFeedbackQueue.from_dict(q.to_dict())
+    for key in q.release_epochs():  # ascending, so each pop is exactly one bucket
+        v1["buckets"][key] = dict(drain.pop_due_batch(key).columns)
+    old = DelayedFeedbackQueue.from_dict(pickle.loads(pickle.dumps(v1)))
+    new = DelayedFeedbackQueue.from_dict(pickle.loads(pickle.dumps(q.to_dict())))
+    for key in q.release_epochs():
+        assert [x.to_dict() for x in old.pop_due(key)] == [x.to_dict() for x in new.pop_due(key)]
+    chunk = next(iter(q._buckets.values()))[0][0]
+    assert all(chunk[c].dtype == np.int32 for c in ("policy", "group", "decision_epoch"))
+    assert q.to_dict()["version"] == 2
+
+
 def test_replayed_decision_updates_a_policy(small_arm_space, segmenter):
     pol = ContextualThompsonSampling(small_arm_space, segmenter, cfg=BanditConfig(warm_start="flat"))
     ctx = BorrowerContext(1, {"grade": "B", "purpose": "credit_card", "home_ownership": "RENT", "annual_inc": 80_000.0})

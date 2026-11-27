@@ -318,14 +318,17 @@ class GaussianArmSet:
         return GaussianArmSet.from_dict(self.to_dict())
 
     # ----- serialisation (JSON-able; σ² is recomputed so it cannot drift from M2) --------
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, compact: bool = False) -> dict[str, Any]:
+        """JSON-able lists by default; ``compact`` keeps exact numpy copies (about a quarter
+        of the memory, for in-memory champions and pickled checkpoints of many groups)."""
+        out = (lambda a: a.copy()) if compact else (lambda a: a.tolist())
         return {
-            "mu": self.mu.tolist(),
-            "n": self.n.tolist(),
-            "m2": self.m2.tolist(),
-            "prior_mu": self.prior_mu.tolist(),
-            "prior_sigma2": self.prior_sigma2.tolist(),
-            "selections": self.selections.tolist(),
+            "mu": out(self.mu),
+            "n": out(self.n),
+            "m2": out(self.m2),
+            "prior_mu": out(self.prior_mu),
+            "prior_sigma2": out(self.prior_sigma2),
+            "selections": out(self.selections),
             "n_updates": int(self.n_updates),
         }
 

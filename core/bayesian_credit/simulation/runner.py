@@ -156,6 +156,8 @@ ENV_RNG_STREAM = 7
 ROLLING_EPOCHS = 3
 #: Re-derive the environment's Stage-1 child priors every this many epochs.
 REFRESH_EVERY = 12
+#: Stream rows per chunk when the per-borrower facts are prepared.
+STATIC_CHUNK = 100_000
 #: Groups (by arrivals so far) whose posteriors are snapshotted, besides the pooled level.
 SNAPSHOT_TOP_GROUPS = 10
 CHECKPOINT_FORMAT = 1
@@ -408,9 +410,19 @@ class SimulationRunner:
     # static preparation (pure functions of data + config; recomputed on resume)
     # ==================================================================================
     def _prepare_static(self) -> None:
+        """Per-borrower facts of the stream, computed once and kept compact.
+
+        The stream is never materialised as a frame: it is an index into ``self.table``
+        (:attr:`stream_rows`, in ``(issue_d, loan_id)`` order) plus a few per-borrower
+        arrays (loan id, historical arm, realised reward, hindsight group and oracle,
+        feedback timing). Everything wider - contexts, guardrail eligibility, the PSI
+        window, the interim repayment plan - is built per epoch from that epoch's rows
+        (:meth:`_epoch_frame`), the way a production system reads each month's
+        applications, so memory does not grow with the length of the stream. Every
+        quantity is a per-row function, so the result is identical to building it at once.
+        """
         cfg, sim = self.cfg, self.sim_cfg
         t = self.table
-        k = self.arm_space.n_arms
         self.snapshot = pd.Timestamp(cfg.data.snapshot_date)
         start, end = pd.Timestamp(sim.start), pd.Timestamp(sim.end)
         self.start_mi = start.year * 12 + start.month - 1
@@ -424,10 +436,12 @@ class SimulationRunner:
             stream_idx = np.sort(stream_idx[pick])
         if stream_idx.size == 0:
             raise ConfigurationError(f"no loans issued between {sim.start} and {sim.end}")
-        stream = t.iloc[stream_idx].sort_values(["issue_d", "loan_id"], kind="stable").reset_index(drop=True)
-        self.stream = stream
-        n = len(stream)
-        issue_mi = month_index_of(stream["issue_d"]).astype(np.int64)
+        # stable lexicographic order = a stable sort on (issue_d, loan_id)
+        order = np.lexsort((t["loan_id"].to_numpy()[stream_idx], issue.to_numpy()[stream_idx]))
+        self.stream_rows = stream_idx[order]
+        n = int(self.stream_rows.size)
+        self.n_stream = n
+        issue_mi = month_index_of(issue.iloc[self.stream_rows]).astype(np.int64)
         self.issue_mi = issue_mi
         months = np.unique(issue_mi)
         self.epoch_mi = months
@@ -438,39 +452,26 @@ class SimulationRunner:
         self._mi_base = int(min(self.start_mi, months.min()))
         top = int(max(self.end_mi, months.max())) + 2
         self._mi_to_epoch = np.array([epoch_of_month(m) for m in range(self._mi_base, top + 1)], dtype=object)
+        self._epoch_cache: tuple[int, pd.DataFrame] | None = None
 
-        # ---- contexts (pre-decision only) and PSI windows ----
-        self.ctx_columns = [c for c in PRE_DECISION_COLUMNS if c in stream.columns]
-        self.ctx_frame = stream.loc[:, ["loan_id", *self.ctx_columns]]
-        LeakageGuard.assert_allowed(self.ctx_frame.columns, Stage.PRE_DECISION)
+        # ---- contexts (pre-decision only) and PSI windows: column positions, read per epoch ----
+        self.ctx_columns = [c for c in PRE_DECISION_COLUMNS if c in t.columns]
+        LeakageGuard.assert_allowed(["loan_id", *self.ctx_columns], Stage.PRE_DECISION)
         self.psi_features = [f for f in cfg.psi.features if f in t.columns]
         if not self.psi_features:
             raise ConfigurationError(f"none of the PSI features {cfg.psi.features} is in the data")
-        self.stream_psi = stream.loc[:, self.psi_features]
         ref = t.loc[(issue < start).to_numpy(), self.psi_features]
         if len(ref) == 0:
             raise ConfigurationError(f"empty PSI reference window (no loans issued before {sim.start})")
         self.reference = ref
 
-        # ---- per-row decision inputs: lending guardrails (pre-decision income, DTI and the
-        # reference rate of the sub-grade; no rate corridor for fits without reference rates) ----
-        self.loan_ids = stream["loan_id"].to_numpy(dtype=np.int64)
-        hist = stream["y_historical_arm"].to_numpy(dtype=np.int64)
+        # ---- per-borrower decision inputs ----
+        k = self.arm_space.n_arms
+        self.loan_ids = t["loan_id"].to_numpy(dtype=np.int64)[self.stream_rows]
+        hist = t["y_historical_arm"].to_numpy(dtype=np.int64)[self.stream_rows]
         self.hist = hist
         self.valid_hist = (hist >= 0) & (hist < k)
         self.reference_rates = getattr(self.fitted, "reference_rates", None)
-        self.reference_rate = (
-            self.reference_rates.for_frame(stream) if self.reference_rates is not None else np.full(n, np.nan)
-        )
-        self.elig = self.arm_space.eligible_many(
-            stream["annual_inc"] if "annual_inc" in stream.columns else np.full(n, np.nan),
-            stream["dti"] if "dti" in stream.columns else None,
-            self.reference_rate if self.reference_rates is not None else None,
-        )
-        self.elig_hist = self.elig.copy()
-        vh = np.flatnonzero(self.valid_hist)
-        self.elig_hist[vh, hist[vh]] = True
-        self.realized = self.reward_fn.terminal_many(stream)
 
         # ---- hindsight yardstick (original segmentation; the same prepayment table as the
         # learning environment, so both use the same reward formula). Its risk model uses the
@@ -484,53 +485,39 @@ class SimulationRunner:
             hind_rows = t.loc[elapsed_term_mask(t, self.snapshot)]
         hind_panel = LoanStatePanel.from_table(t, cfg.mctm, self.snapshot)
         hind_mctm = MarkovChainTransitionMatrix.from_config(cfg.mctm).fit_counts(hind_panel.counts)
+        del hind_panel
         self.hindsight = BayesianEnvironment.fit(
             hind_rows, cfg, arm_space=self.arm_space, segmenter=self.segmenter0, reward_fn=self.reward_fn,
             mctm=hind_mctm, snapshot_date=self.snapshot, interest_realization=self.interest_realization,
         )
-        codes, uniq = pd.factorize(stream["y_group"].astype(str))
+        del hind_rows
+        codes, uniq = pd.factorize(t["y_group"].iloc[self.stream_rows].astype(str))
         self.hind_code = codes.astype(np.int64)
         self.hind_groups = list(uniq)
+        self._hind_group_names = np.asarray(self.hind_groups, dtype=object)
         _, _, self.hind_score = self.hindsight.expected_table(self.hind_groups)
+
+        # ---- realised reward and the oracle, in chunks (eligibility is per borrower) ----
+        self.realized = np.empty(n)
         oracle = np.empty(n)
-        for lo in range(0, n, 25_000):
-            hi = min(lo + 25_000, n)
+        for lo in range(0, n, STATIC_CHUNK):
+            hi = min(lo + STATIC_CHUNK, n)
+            chunk = self._stream_frame(lo, hi)
+            self.realized[lo:hi] = self.reward_fn.terminal_many(chunk)
+            _, elig_hist = self._eligibility(chunk, lo, hi)
             s = self.hind_score[self.hind_code[lo:hi]]
-            oracle[lo:hi] = np.max(np.where(self.elig_hist[lo:hi], s, -np.inf), axis=1)
+            oracle[lo:hi] = np.max(np.where(elig_hist, s, -np.inf), axis=1)
         self.oracle = oracle
 
         # ---- feedback timing: observation month = max(resolution month, issue month + 1) ----
-        res_mi = month_index_of(stream["y_resolution_date"])
-        resolved = stream["y_resolved"].to_numpy(dtype=bool) & np.isfinite(res_mi)
-        obs_mi = np.where(resolved, np.maximum(np.nan_to_num(res_mi, nan=0.0), issue_mi + 1), np.inf)
-        self.term_rel = np.where(obs_mi <= self.end_mi, obs_mi, -1).astype(np.int64)
+        res_mi = month_index_of(t["y_resolution_date"].iloc[self.stream_rows])
+        resolved = t["y_resolved"].to_numpy(dtype=bool)[self.stream_rows] & np.isfinite(res_mi)
+        self.obs_mi = np.where(resolved, np.maximum(np.nan_to_num(res_mi, nan=0.0), issue_mi + 1), np.inf)
+        self.term_rel = np.where(self.obs_mi <= self.end_mi, self.obs_mi, -1).astype(np.int64)
         max_w = max(
             (sp.bandit_config(cfg.bandit).interim_weight for sp in self.specs), default=0.0
         )
         self.schedule_interim = sim.interim_months > 0 and max_w > 0
-        if self.schedule_interim:
-            m_count = int(sim.interim_months)
-            panel = LoanStatePanel.from_table(stream, cfg.mctm, self.snapshot)
-            states = np.empty((n, m_count), dtype=np.int8)
-            paid = np.empty((n, m_count), dtype=np.int16)
-            for m in range(1, m_count + 1):
-                s, p = panel.interim_states(stream, m)
-                states[:, m - 1] = s
-                paid[:, m - 1] = p
-            transient = np.isin(states, _TRANSIENT)
-            alive = np.cumprod(transient, axis=1).astype(bool)  # stop after an absorbing state
-            rel = issue_mi[:, None] + np.arange(1, m_count + 1)[None, :]
-            ok = alive & (rel <= self.end_mi) & (rel < obs_mi[:, None])
-            rows_i, cols_m = np.nonzero(ok)
-            self.plan_row = rows_i.astype(np.int64)
-            self.plan_month = (cols_m + 1).astype(np.int16)
-            self.plan_state = states[rows_i, cols_m]
-            self.plan_paid = paid[rows_i, cols_m]
-            self.plan_rel = rel[rows_i, cols_m].astype(np.int64)
-            self.plan_bounds = np.searchsorted(self.plan_row, np.arange(n + 1))
-        else:
-            self.plan_row = np.empty(0, dtype=np.int64)
-            self.plan_bounds = np.zeros(n + 1, dtype=np.int64)
 
         # ---- environment learning schedule over the whole table ----
         t_issue = month_index_of(issue)
@@ -546,8 +533,123 @@ class SimulationRunner:
         self.obs_arm = t["y_historical_arm"].to_numpy(dtype=np.int64)[self.obs_rows]
         self.obs_default = t_def[self.obs_rows]
         self.obs_recovery = t["y_recovery_rate"].to_numpy(dtype=float, na_value=np.nan)[self.obs_rows]
-        self._y_group_all = t["y_group"].astype(str).to_numpy(dtype=object)
-        self._y_group_stream = stream["y_group"].astype(str).to_numpy(dtype=object)
+
+    # ----- per-epoch views of the stream (built on demand, never for the whole stream) ----------
+    def _stream_frame(self, lo: int, hi: int, columns: list[str] | None = None) -> pd.DataFrame:
+        """Rows ``lo:hi`` of the stream as a frame (index 0..), optionally only ``columns``."""
+        idx = self.stream_rows[lo:hi]
+        if columns is None:
+            return self.table.iloc[idx].reset_index(drop=True)
+        pos = [self.table.columns.get_loc(c) for c in columns]
+        return self.table.iloc[idx, pos].reset_index(drop=True)
+
+    def _epoch_frame(self, i: int) -> pd.DataFrame:
+        """The borrowers arriving in epoch ``i`` (cached for the epoch being processed)."""
+        if self._epoch_cache is None or self._epoch_cache[0] != i:
+            lo, hi = self.bounds[i]
+            self._epoch_cache = (i, self._stream_frame(lo, hi))
+        return self._epoch_cache[1]
+
+    def _eligibility(self, frame: pd.DataFrame, lo: int, hi: int) -> tuple[np.ndarray, np.ndarray]:
+        """Guardrail masks ``(elig, elig_hist)`` of stream rows ``lo:hi`` (``frame`` = those rows):
+        pre-decision income, DTI and the sub-grade's reference rate (no rate corridor for fits
+        without reference rates); the historical policy may also take the loan's own arm."""
+        n = hi - lo
+        ref = self.reference_rates.for_frame(frame) if self.reference_rates is not None else None
+        elig = self.arm_space.eligible_many(
+            frame["annual_inc"] if "annual_inc" in frame.columns else np.full(n, np.nan),
+            frame["dti"] if "dti" in frame.columns else None,
+            ref,
+        )
+        elig_hist = elig.copy()
+        vh = np.flatnonzero(self.valid_hist[lo:hi])
+        elig_hist[vh, self.hist[lo:hi][vh]] = True
+        return elig, elig_hist
+
+    def _interim_plan(self, i: int) -> dict[str, np.ndarray]:
+        """Interim feedback the loans of epoch ``i`` will produce: for each (row, loan month)
+        still in a transient state, before the stream ends and before resolution - the
+        borrower's real repayment path (row-major: rows ascending, then months)."""
+        lo, hi = self.bounds[i]
+        m_count = int(self.sim_cfg.interim_months)
+        frame = self._epoch_frame(i)
+        panel = LoanStatePanel.from_table(frame, self.cfg.mctm, self.snapshot)
+        n = hi - lo
+        states = np.empty((n, m_count), dtype=np.int8)
+        paid = np.empty((n, m_count), dtype=np.int16)
+        for m in range(1, m_count + 1):
+            s, p = panel.interim_states(frame, m)
+            states[:, m - 1] = s
+            paid[:, m - 1] = p
+        transient = np.isin(states, _TRANSIENT)
+        alive = np.cumprod(transient, axis=1).astype(bool)  # stop after an absorbing state
+        rel = self.issue_mi[lo:hi][:, None] + np.arange(1, m_count + 1)[None, :]
+        ok = alive & (rel <= self.end_mi) & (rel < self.obs_mi[lo:hi][:, None])
+        rows_i, cols_m = np.nonzero(ok)
+        return {
+            "local": rows_i.astype(np.int64),
+            "month": (cols_m + 1).astype(np.int16),
+            "state": states[rows_i, cols_m],
+            "paid": paid[rows_i, cols_m],
+            "rel": rel[rows_i, cols_m].astype(np.int64),
+        }
+
+    def _stream_groups(self, rows: np.ndarray) -> np.ndarray:
+        """Group keys of stream rows under the environment's current segmentation."""
+        rows = np.asarray(rows, dtype=np.int64)
+        if self._env_seg is None:
+            return self._hind_group_names[self.hind_code[rows]]
+        codes = self._env_codes[rows]
+        miss = codes < 0
+        if miss.any():
+            todo = np.unique(rows[miss])
+            keys = self._env_seg.assign(self.table.iloc[self.stream_rows[todo]]).astype(str).to_numpy(dtype=object)
+            names, inverse = np.unique(keys, return_inverse=True)
+            index = self._env_index
+            mapped = np.empty(names.size, dtype=np.int32)
+            for j, name in enumerate(names.tolist()):
+                code = index.get(name)
+                if code is None:
+                    code = index[name] = len(self._env_names)
+                    self._env_names.append(name)
+                mapped[j] = code
+            self._env_codes[todo] = mapped[inverse]
+            codes = self._env_codes[rows]
+        return np.asarray(self._env_names, dtype=object)[codes]
+
+    def _observed_groups(self, lo: int, hi: int) -> np.ndarray:
+        """Group keys of ``obs_rows[lo:hi]`` (table loans resolving now) for the environment."""
+        rows = self.obs_rows[lo:hi]
+        if self._env_seg is None:
+            return self.table["y_group"].iloc[rows].astype(str).to_numpy(dtype=object)
+        return self._env_seg.assign(self.table.iloc[rows]).astype(str).to_numpy(dtype=object)
+
+    # ----- whole-stream views (tests and diagnostics; built on demand, O(stream) memory) ---------
+    @property
+    def stream(self) -> pd.DataFrame:
+        return self._stream_frame(0, self.n_stream)
+
+    @property
+    def ctx_frame(self) -> pd.DataFrame:
+        return self._stream_frame(0, self.n_stream, ["loan_id", *self.ctx_columns])
+
+    @property
+    def stream_psi(self) -> pd.DataFrame:
+        return self._stream_frame(0, self.n_stream, self.psi_features)
+
+    @property
+    def reference_rate(self) -> np.ndarray:
+        if self.reference_rates is None:
+            return np.full(self.n_stream, np.nan)
+        return self.reference_rates.for_frame(self.stream)
+
+    @property
+    def elig(self) -> np.ndarray:
+        return self._eligibility(self.stream, 0, self.n_stream)[0]
+
+    @property
+    def elig_hist(self) -> np.ndarray:
+        return self._eligibility(self.stream, 0, self.n_stream)[1]
 
     def _epoch_strings(self, months: np.ndarray) -> np.ndarray:
         return self._mi_to_epoch[np.asarray(months, dtype=np.int64) - self._mi_base]
@@ -558,12 +660,11 @@ class SimulationRunner:
     def _set_env_groups(self) -> None:
         """Group keys of the stream / observed loans under the environment's segmentation."""
         seg = self.env.segmenter
-        if seg is None or seg == self.segmenter0:
-            self._stream_env_groups = self._y_group_stream
-            self._obs_groups = self._y_group_all[self.obs_rows]
-        else:
-            self._stream_env_groups = seg.assign(self.stream).astype(str).to_numpy(dtype=object)
-            self._obs_groups = seg.assign(self.table.iloc[self.obs_rows]).astype(str).to_numpy(dtype=object)
+        # under a refined segmentation the keys are derived lazily, per row, on first use
+        self._env_seg = None if seg is None or seg == self.segmenter0 else seg
+        self._env_codes = np.full(self.n_stream, -1, dtype=np.int32)
+        self._env_names: list[str] = []
+        self._env_index: dict[str, int] = {}
 
     def _new_sentinel(self) -> PSISentinel:
         return PSISentinel.from_reference(
@@ -626,7 +727,7 @@ class SimulationRunner:
     def _checkpoint_state(self, epoch_index: int) -> dict[str, Any]:
         policies, governed = {}, {}
         for name, gov in self.governed.items():
-            st = gov.state()
+            st = gov.state(compact=True)
             policies[name] = st.pop("policy")
             governed[name] = st
         return {
@@ -697,7 +798,7 @@ class SimulationRunner:
                             "n_epochs": len(self.epochs),
                             "first_epoch": self.epochs[0],
                             "last_epoch": self.epochs[-1],
-                            "n_loans": int(len(self.stream)),
+                            "n_loans": int(self.n_stream),
                             "policies": self.policy_names,
                             "feedback_mode": FeedbackMode(self.sim_cfg.feedback_mode).value,
                             "breaker_mode": self.sim_cfg.breaker_mode,
@@ -892,7 +993,7 @@ class SimulationRunner:
         w = max(int(self.sim_cfg.psi_window_months), 1)
         lo = self.bounds[max(0, i - w + 1)][0]
         hi = self.bounds[i][1]
-        return self.stream_psi.iloc[lo:hi]
+        return self._stream_frame(lo, hi, self.psi_features)
 
     def _evaluate_sentinel(self, i: int) -> SentinelReading:
         e = self.epochs[i]
@@ -1084,7 +1185,7 @@ class SimulationRunner:
             return stats
         c = batch.columns
         kind, rows, arms, match = c["kind"], c["row"], c["arm"], c["match"]
-        env_g = self._stream_env_groups[rows]
+        env_g = self._stream_groups(rows)
         rewards = np.full(n, np.nan)
         mode = FeedbackMode(self.sim_cfg.feedback_mode)
         interim = kind == 0
@@ -1156,7 +1257,8 @@ class SimulationRunner:
         n = 0
         if end > ptr:
             n = self.env.observe_outcomes(
-                self._obs_groups[ptr:end], self.obs_arm[ptr:end], self.obs_default[ptr:end], self.obs_recovery[ptr:end]
+                self._observed_groups(ptr, end), self.obs_arm[ptr:end], self.obs_default[ptr:end],
+                self.obs_recovery[ptr:end],
             )
         self.ms["obs_pointer"] = end
         return n
@@ -1165,11 +1267,12 @@ class SimulationRunner:
     def contexts(self, i: int) -> list[BorrowerContext]:
         """The :class:`BorrowerContext` objects shown to the policies in epoch ``i``."""
         lo, hi = self.bounds[i]
-        ctx = self.ctx_frame.iloc[lo:hi]
+        frame = self._epoch_frame(i)
+        ctx = frame.loc[:, ["loan_id", *self.ctx_columns]]
         LeakageGuard.assert_allowed(ctx.columns, Stage.PRE_DECISION)
         cols = self.ctx_columns
         values = [ctx[c].tolist() for c in cols]
-        issue = self.stream["issue_d"].iloc[lo:hi].tolist()
+        issue = frame["issue_d"].tolist()
         return [
             BorrowerContext(loan_id=int(lid), features=dict(zip(cols, vals, strict=True)), issue_date=pd.Timestamp(ts))
             for lid, vals, ts in zip(self.loan_ids[lo:hi].tolist(), zip(*values, strict=True), issue, strict=True)
@@ -1179,7 +1282,9 @@ class SimulationRunner:
         lo, hi = self.bounds[i]
         n = hi - lo
         contexts = self.contexts(i)
-        ctx_frame = self.ctx_frame.iloc[lo:hi]
+        frame = self._epoch_frame(i)
+        ctx_frame = frame.loc[:, ["loan_id", *self.ctx_columns]]
+        elig, elig_hist = self._eligibility(frame, lo, hi)
         hist = [int(h) if ok else None for h, ok in zip(self.hist[lo:hi].tolist(), self.valid_hist[lo:hi].tolist(), strict=True)]
         n_pol = len(self.specs)
         arms = np.zeros((n_pol, n), dtype=np.int64)
@@ -1191,7 +1296,7 @@ class SimulationRunner:
             gov = self.governed[spec.label]
             gov.prime_groups(ctx_frame)
             rng = np.random.default_rng([int(self.sim_cfg.seed), int(i), int(p)])
-            masks = (self.elig_hist if spec.is_historical else self.elig)[lo:hi]
+            masks = elig_hist if spec.is_historical else elig
             select = gov.select
             arm_row, grp_row, fb_row, new_row, sv_row = arms[p], groups[p], fallback[p], new[p], segv[p]
             for j in range(n):
@@ -1245,19 +1350,19 @@ class SimulationRunner:
         e = self.epochs[i]
         lo, hi = self.bounds[i]
         null = self.arm_space.null_arm
-        p_lo, p_hi = int(self.plan_bounds[lo]), int(self.plan_bounds[hi])
-        local = self.plan_row[p_lo:p_hi] - lo
+        plan = self._interim_plan(i) if self.schedule_interim else None
+        local = plan["local"] if plan is not None else np.empty(0, dtype=np.int64)
         term_local = np.flatnonzero(self.term_rel[lo:hi] >= 0)
         hist = self.hist[lo:hi]
         for p, name in enumerate(self.policy_names):
             a = dec["arms"][p]
             lend = a != (null if null is not None else -1)
-            if self.schedule_interim and local.size:
+            if plan is not None and local.size:
                 sel = lend[local]
                 if sel.any():
                     jj = local[sel]
                     self.queue.schedule_batch(
-                        self._epoch_strings(self.plan_rel[p_lo:p_hi][sel]),
+                        self._epoch_strings(plan["rel"][sel]),
                         kind=np.zeros(jj.size, dtype=np.int8),
                         policy=name,
                         loan_id=self.loan_ids[lo + jj],
@@ -1266,9 +1371,9 @@ class SimulationRunner:
                         group=dec["groups"][p][jj],
                         seg_version=dec["seg_version"][p][jj],
                         fallback=dec["fallback"][p][jj],
-                        month=self.plan_month[p_lo:p_hi][sel],
-                        months_paid=self.plan_paid[p_lo:p_hi][sel],
-                        state=self.plan_state[p_lo:p_hi][sel],
+                        month=plan["month"][sel],
+                        months_paid=plan["paid"][sel],
+                        state=plan["state"][sel],
                         match=a[jj] == hist[jj],
                         decision_epoch=e,
                     )
