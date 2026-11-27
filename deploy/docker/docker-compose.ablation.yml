@@ -1,0 +1,17 @@
+# Overlay for the ablation study (docs/REPRODUCE.md): one job at a time on a larger worker.
+#
+#   docker compose -f deploy/docker/docker-compose.yml -f deploy/docker/docker-compose.ablation.yml up -d --wait
+#
+# ABLATION_WORKER_MEMORY / ABLATION_WORKER_CPUS size the worker (defaults: 9g, 10 CPUs, for a 16 GB /
+# 12-thread machine running nothing else). Swap is off for the worker (memswap_limit = memory), so a
+# job that outgrows the limit is stopped instead of pushing the host into swap.
+services:
+  worker:
+    environment:
+      TEMPORAL_WORKER_CONCURRENCY: "1"
+    deploy:
+      resources:
+        limits:
+          cpus: "${ABLATION_WORKER_CPUS:-10}"
+          memory: ${ABLATION_WORKER_MEMORY:-9g}
+    memswap_limit: ${ABLATION_WORKER_MEMORY:-9g}

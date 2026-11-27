@@ -368,6 +368,7 @@ The proposal leaves a handful of details open. Each choice is a configuration de
 | [`docs/SIMULATION.md`](docs/SIMULATION.md) | epochs, feedback modes, oracle & regret, run-directory protocol, resume semantics, caveats |
 | [`docs/API.md`](docs/API.md) | every endpoint with examples; `/api/docs/` serves the OpenAPI schema |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | images, compose, K3s/Talos, the Table 10 resilience experiments |
+| [`docs/REPRODUCE.md`](docs/REPRODUCE.md) | reproducing the pilot / full variable-ablation study (Docker, CLI or K8s), comparing reproductions, cleaning caches |
 
 ## Citing
 
