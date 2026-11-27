@@ -20,7 +20,7 @@ import { portfolioResult } from './portfolio';
 import { completeContext, evaluateShadow, isPreDecisionKey } from './shadow';
 import { type DatasetRec, type FitRec, datasetIndex, db, fitMctm, fitModel, newJob } from './store';
 import { Errors, badRequest, body, conflict, epochOk, isObj, notFound, num, str } from './validate';
-import { SELECTABLE_VARIABLES, TABLE3, variableCatalogue } from './vocab';
+import { SELECTABLE_VARIABLES, TABLE3, issueMaxOf, variableCatalogue } from './vocab';
 import type { Route } from './router';
 
 const list = (q: URLSearchParams, key: string) =>
@@ -60,7 +60,7 @@ function createDataset(raw: unknown, now: number) {
   e.check(epochOk(b.issue_from), 'issue_from', 'Use YYYY-MM.');
   e.check(epochOk(b.issue_to), 'issue_to', 'Use YYYY-MM.');
   const from = (str(b.issue_from) ?? '2012-01');
-  const to = (str(b.issue_to) ?? '2018-12');
+  const to = (str(b.issue_to) ?? issueMaxOf(String(source)));
   e.check(from <= to, 'issue_to', 'Must not precede issue_from.');
   if (source === 'lending_club') e.check(from >= '2007-06' && to <= '2020-09', 'issue_from', 'Lending Club issue dates in Loan_status_2007-2020Q3.csv span 2007-06 to 2020-09.');
   else e.check(to <= '2019-03', 'issue_to', 'Synthetic loans cannot be issued after the 2019-03 snapshot.');
@@ -77,7 +77,7 @@ function createDataset(raw: unknown, now: number) {
   e.check(!bad.length, 'exclude_variables', `unknown or required variable(s), cannot be excluded: ${bad.join(', ')}`);
   const exclude = TABLE3.map((v) => v.name).filter((x) => exclIn.includes(x));
   e.throwIfAny();
-  const nominal = source === 'synthetic' ? n : Math.min(2_500_000, Math.round((maxRows ?? 2_260_701) * (frac ?? 1)));
+  const nominal = source === 'synthetic' ? n : Math.min(2_500_000, Math.round((maxRows ?? 2_925_493) * (frac ?? 1)));
   const id = db.next.dataset++;
   const params: DatasetCreate = {
     name,
@@ -156,7 +156,7 @@ function createFit(raw: unknown, now: number) {
   e.check(reward.prepayment_adjustment === 'empirical' || reward.prepayment_adjustment === null, 'reward.prepayment_adjustment', 'Must be "empirical" or null.');
   const trainEnd = str(b.train_end) ?? d.train_end;
   const range = ds.params;
-  e.check(epochOk(trainEnd) && trainEnd > (range.issue_from ?? '2012-01') && trainEnd <= (range.issue_to ?? '2018-12'), 'train_end', 'Must be a YYYY-MM inside the dataset issue range.');
+  e.check(epochOk(trainEnd) && trainEnd > (range.issue_from ?? '2012-01') && trainEnd <= (range.issue_to ?? issueMaxOf(range.source)), 'train_end', 'Must be a YYYY-MM inside the dataset issue range.');
   e.throwIfAny();
   const id = db.next.fit++;
   const config: FitConfig = { segmentation: { dimensions: seg }, arm_space: arm, hierarchy: hier, recovery, mctm, reward, train_end: trainEnd };

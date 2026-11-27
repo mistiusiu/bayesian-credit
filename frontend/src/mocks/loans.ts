@@ -23,7 +23,8 @@ import {
   PURPOSE_PD_MULT,
   PURPOSE_SHARE,
   RESOLVED_STATUS,
-  SNAPSHOT,
+  issueMaxOf,
+  snapshotOf,
   ST,
   STATUS_KEYS,
   SUB_GRADES,
@@ -55,6 +56,8 @@ export const TERM60_RISK = 1.7;
 export interface LoanIndex {
   n: number;
   seed: number;
+  /** Month the loan statuses were observed (outcomes are censored there). */
+  snapshot: string;
   epochs: string[];
   monthCounts: number[];
   issue: Uint16Array;
@@ -108,7 +111,8 @@ export function buildIndex(params: DatasetCreate, nominalN: number): LoanIndex {
   const seed = params.seed ?? 42;
   const n = Math.max(1000, Math.min(nominalN, 2_500_000));
   const rng = new Rng(seedOf('index', params.source, seed));
-  const epochs = epochRange(params.issue_from ?? '2012-01', params.issue_to ?? '2018-12');
+  const epochs = epochRange(params.issue_from ?? '2012-01', params.issue_to ?? issueMaxOf(params.source));
+  const snapshot = snapshotOf(params.source);
   const monthCounts = arrivalCounts(epochs, n, rng);
   const shift = params.source === 'synthetic' ? params.shift ?? null : null;
   const d = shift?.deltas ?? {};
@@ -116,6 +120,7 @@ export function buildIndex(params: DatasetCreate, nominalN: number): LoanIndex {
   const idx: LoanIndex = {
     n,
     seed,
+    snapshot,
     epochs,
     monthCounts,
     issue: new Uint16Array(n),
@@ -146,7 +151,7 @@ export function buildIndex(params: DatasetCreate, nominalN: number): LoanIndex {
     const year = Number(epoch.slice(0, 4));
     const frac = clamp((year - 2012) / 6, 0, 1);
     const mix = GRADE_MIX_2012.map((a, k) => a + (GRADE_MIX_2018[k] - a) * frac);
-    const mob = epochDiff(epoch, SNAPSHOT);
+    const mob = epochDiff(epoch, snapshot);
     const shifted = shift !== null && epoch >= shift.at;
     const jointAllowed = epoch >= '2015-10';
     const maxAmount = epoch >= '2016-03' ? 40000 : 35000;
@@ -357,7 +362,7 @@ export function loanOutcome(idx: LoanIndex, i: number): LoanOutcome {
   const st = idx.status[i];
   const resolved = RESOLVED_STATUS.has(st);
   const defaulted = DEFAULTED_STATUS.has(st);
-  const mobSnapshot = epochDiff(epoch, SNAPSHOT);
+  const mobSnapshot = epochDiff(epoch, idx.snapshot);
   let months = Math.min(mobSnapshot, T);
   let revenue: number | null = null;
   let loss: number | null = null;

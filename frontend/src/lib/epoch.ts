@@ -27,6 +27,12 @@ export function epochRange(from: string, to: string): string[] {
   return out;
 }
 
+/** "2020-10" → "2020-10-31" (last day of the month). */
+export function epochEnd(e: string): string {
+  const [y, m] = e.split('-').map(Number);
+  return `${e}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+}
+
 export function isEpoch(s: string | null | undefined): s is string {
   return !!s && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 }

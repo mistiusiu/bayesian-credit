@@ -154,10 +154,22 @@ export const YEAR_VOLUME: Record<number, number> = {
   2016: 36100,
   2017: 36900,
   2018: 41300,
+  2019: 43000,
+  2020: 9000, // Q1 near 2019 levels, then lending all but stopped (COVID-19)
 };
 
-/** Snapshot month: issue_d ends 2018-12, last_pymnt_d runs to 2019-03. */
+/** Snapshot month of the synthetic twin: issue_d ends 2018-12, last_pymnt_d runs to 2019-03. */
 export const SNAPSHOT = '2019-03';
+/** Snapshot month of the Lending Club 2007-2020Q3 export: issue_d ends 2020-09, observed 2020-10. */
+export const LC_SNAPSHOT = '2020-10';
+/** Last issue month a source can produce (the default `issue_to`). */
+export const LC_ISSUE_MAX = '2020-09';
+export const SYNTHETIC_ISSUE_MAX = '2018-12';
+
+/** Month the loan statuses of a dataset were observed. */
+export const snapshotOf = (source: string) => (source === 'lending_club' ? LC_SNAPSHOT : SNAPSHOT);
+/** Default `issue_to` of a dataset of this source. */
+export const issueMaxOf = (source: string) => (source === 'lending_club' ? LC_ISSUE_MAX : SYNTHETIC_ISSUE_MAX);
 
 /** Mirrors api/apps/datasets/services.py REQUIRED_REASON / core schema.REQUIRED_COLUMNS. */
 const REQUIRED_REASON: Record<string, string> = {
