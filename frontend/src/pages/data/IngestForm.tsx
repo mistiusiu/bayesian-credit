@@ -10,9 +10,10 @@ import { fmt } from '@/lib/format';
 import { ablationTags, matchingPreset } from '@/lib/variables';
 import { VariablePicker } from './VariablePicker';
 
-/** Lending Club accepted file: issue dates and size of the whole file. */
-/** Kaggle ethon0426/lending-club-20072020q1 (Loan_status_2007-2020Q3.csv), observed 2020-10. */
+/** Kaggle ethon0426/lending-club-20072020q1 (Loan_status_2007-2020Q3.csv), observed 2020-10: issue dates and size of the whole file. */
 const LC_SPAN = { from: '2007-06', to: '2020-09', rows: 2_925_493 };
+/** Default issue window per source: Lending Club runs to the end of its file; the synthetic twin is observed at 2019-03. */
+const DEFAULT_TO: Record<DataSource, string> = { lending_club: LC_SPAN.to, synthetic: '2018-12' };
 
 interface State {
   source: DataSource;
@@ -42,7 +43,7 @@ const INITIAL: State = {
   maxRows: 200000,
   fraction: null,
   from: '2012-01',
-  to: '2018-12',
+  to: DEFAULT_TO.synthetic,
   shift: true,
   shiftAt: '2016-06',
   fico: -25,
@@ -120,7 +121,7 @@ export function IngestForm({ onCreated, template = null }: { onCreated: (d: Data
           <Segmented<DataSource>
             label="Source"
             value={s.source}
-            onChange={(v) => set('source', v)}
+            onChange={(v) => setS((p) => ({ ...p, source: v, to: p.to === DEFAULT_TO[p.source] ? DEFAULT_TO[v] : p.to }))}
             options={[
               { value: 'synthetic', label: 'Synthetic twin' },
               { value: 'lending_club', label: 'Lending Club CSV' },
