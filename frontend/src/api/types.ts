@@ -1176,6 +1176,8 @@ export interface SimulationCreate {
   /** Cold start without a fit: replay this dataset (the world is fitted on the loans before `start`). */
   dataset?: Id | null;
   cold_start?: boolean;
+  /** Cold start without a fit only: groups of the replay world and the policies (default: the dataset's default dimensions). 400 with a fit. */
+  segmentation?: { dimensions: SegmentationDimension[] } | null;
   name: string;
   policies: PolicyName[];
   feedback_mode?: FeedbackMode;

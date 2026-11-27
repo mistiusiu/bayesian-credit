@@ -63,6 +63,8 @@ function createSimulation(raw: unknown, now: number) {
   const datasetId = num(b.dataset);
   e.check(fitId !== null || coldStart, 'fit', 'A fit is required unless cold_start is true (then a dataset is enough).');
   e.check(fitId !== null || datasetId !== null, 'dataset', 'A cold start without a fit needs a dataset.');
+  // the real API segments a fit-less world as asked; the mock borrows a fit's world (below)
+  e.check(fitId === null || b.segmentation == null, 'segmentation', `The run uses fit ${fitId}'s segmentation; omit segmentation or the fit.`);
   const name = str(b.name)?.trim() ?? '';
   e.check(name.length > 0, 'name', 'This field is required.');
   const rawPolicies = Array.isArray(b.policies) ? b.policies : [];
