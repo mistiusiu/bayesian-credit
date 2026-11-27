@@ -12,6 +12,7 @@ import { buildReport } from './report';
 import { fitMetrics } from './fitViews';
 import { type SimRec, datasetIndex, db, fitMctm, fitModel, iso, newJob, presetDecision, refine, simSeriesFor, tick } from './store';
 import { Errors, badRequest, body, conflict, epochOk, isObj, notFound, num, str } from './validate';
+import { issueMaxOf } from './vocab';
 import { simView } from './views';
 
 const MS_PER_EPOCH = 380;
@@ -78,10 +79,10 @@ function createSimulation(raw: unknown, now: number) {
   e.check(fitId === null || datasetId === null || datasetId === fit.datasetId, 'dataset', `fit ${fit.id} was trained on dataset ${fit.datasetId}; omit dataset or match it`);
   e.throwIfAny();
   const ds = db.datasets.get(fit.datasetId)!;
-  const start = str(b.start) ?? '2015-01';
-  const end = str(b.end) ?? '2018-12';
+  const start = str(b.start) ?? fit.config.train_end;
+  const end = str(b.end) ?? ds.params.issue_to ?? issueMaxOf(ds.params.source);
   e.check(epochOk(start) && epochOk(end) && start <= end, 'start', 'start and end are YYYY-MM with start ≤ end.');
-  e.check(start >= (ds.params.issue_from ?? '2012-01') && end <= (ds.params.issue_to ?? '2018-12'), 'end', 'Epochs must lie inside the dataset issue range.');
+  e.check(start >= (ds.params.issue_from ?? '2012-01') && end <= (ds.params.issue_to ?? issueMaxOf(ds.params.source)), 'end', 'Epochs must lie inside the dataset issue range.');
   const fm = b.feedback_mode ?? 'simulated';
   e.check(fm === 'simulated' || fm === 'replay' || fm === 'hybrid', 'feedback_mode', 'simulated | replay | hybrid');
   const bm = b.breaker_mode ?? 'auto_ack';

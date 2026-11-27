@@ -8,7 +8,8 @@ data:
   CORS_ALLOW_ALL_ORIGINS: "1"
   DATA_ROOT: /app/data
   ARTIFACT_ROOT: /app/data/artifacts
-  LENDING_CLUB_PATH: /app/data/raw/accepted_2007_to_2018Q4.csv.gz
+  # Kaggle ethon0426/lending-club-20072020q1; point at accepted_2007_to_2018Q4.csv.gz for the legacy export
+  LENDING_CLUB_PATH: /app/data/raw/Loan_status_2007-2020Q3.csv
   GUNICORN_WORKERS: "2"
   GUNICORN_THREADS: "4"
   # Background jobs are Temporal workflows (temporal.yaml) executed by the worker Deployment.

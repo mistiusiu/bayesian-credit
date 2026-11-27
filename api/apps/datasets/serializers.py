@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bayesian_credit.data.loader import KNOWN_SOURCES
+from bayesian_credit.data.loader import DEFAULT_FILENAME, KNOWN_SOURCES
 from bayesian_credit.data.schema import NUMERIC_COLUMNS, PRE_DECISION_COLUMNS, validate_exclusion
 from bayesian_credit.data.synthetic import DEFAULT_SHIFT, DEFAULT_SHIFT_AT
 from django.conf import settings
@@ -19,6 +19,15 @@ from .models import Dataset
 SOURCES = ["synthetic", "lending_club"]
 SHIFTABLE = (set(PRE_DECISION_COLUMNS) & set(NUMERIC_COLUMNS)) - {"installment", "fico_range_high"}
 SHIFT_EXTRA = {"grade_mix", "latent"}
+#: Default issue window of synthetic datasets (the generator observes them at 2019-03-31).
+SYNTHETIC_SPAN = {"issue_min": "2012-01", "issue_max": "2018-12"}
+
+
+def lending_club_span(filename: str) -> dict[str, str]:
+    """Issue-month range of a Kaggle export by file name; unknown files are assumed to be
+    shaped like the default 2007-2020Q3 export."""
+    known = KNOWN_SOURCES.get(filename) or KNOWN_SOURCES[DEFAULT_FILENAME]
+    return {"issue_min": known["issue_min"], "issue_max": known["issue_max"]}
 
 
 class DistributionShiftSerializer(serializers.Serializer):
@@ -70,15 +79,8 @@ class DatasetCreateSerializer(serializers.Serializer):
             issue_to = parse_epoch(issue_to, "issue_to") if issue_to else None
         except serializers.ValidationError as exc:
             raise serializers.ValidationError(exc.detail) from None
-        # docs/API.md §5.1: both sources default to 2012-01 .. 2018-12 (inclusive)
-        issue_from = issue_from or "2012-01"
-        issue_to = issue_to or "2018-12"
-        if synthetic and issue_to > "2019-03":
-            errors.setdefault("issue_to", []).append("Synthetic loans cannot be issued after the 2019-03 snapshot.")
-        if issue_from > issue_to:
-            errors.setdefault("issue_to", []).append("Must not precede issue_from.")
-
         path = None
+        span = SYNTHETIC_SPAN
         if not synthetic:
             raw = (attrs.get("path") or "").strip()
             candidate = Path(raw).expanduser() if raw else Path(settings.LENDING_CLUB_PATH)
@@ -93,11 +95,20 @@ class DatasetCreateSerializer(serializers.Serializer):
                     f"File not found: {candidate}. Run scripts/download_data.sh or use source='synthetic'."
                 )
             path = str(candidate)
-            known = KNOWN_SOURCES.get(candidate.name) or {"issue_min": "2007-06", "issue_max": "2020-09"}
-            if not (known["issue_min"] <= issue_from and issue_to <= known["issue_max"]):
-                errors.setdefault("issue_from", []).append(
-                    f"Lending Club issue dates in {candidate.name} span {known['issue_min']} to {known['issue_max']}."
-                )
+            span = lending_club_span(candidate.name)
+
+        # docs/API.md §5.1: issue_from defaults to 2012-01; issue_to to the last month the
+        # source can issue (2020-09 for the 2007-2020Q3 export, 2018-12 for synthetic and legacy)
+        issue_from = issue_from or "2012-01"
+        issue_to = issue_to or span["issue_max"]
+        if synthetic and issue_to > "2019-03":
+            errors.setdefault("issue_to", []).append("Synthetic loans cannot be issued after the 2019-03 snapshot.")
+        if issue_from > issue_to:
+            errors.setdefault("issue_to", []).append("Must not precede issue_from.")
+        if not synthetic and not (span["issue_min"] <= issue_from and issue_to <= span["issue_max"]):
+            errors.setdefault("issue_from", []).append(
+                f"Lending Club issue dates in {Path(path).name} span {span['issue_min']} to {span['issue_max']}."
+            )
 
         shift = None
         raw_shift = attrs.get("shift")
@@ -164,6 +175,9 @@ class DatasetSerializer(serializers.ModelSerializer):
     status = serializers.ChoiceField(source="current_status", choices=list(BUILD_STATUSES), read_only=True)
     params = DatasetCreateSerializer(read_only=True)
     job = JobSerializer(read_only=True, allow_null=True)
+    snapshot_date = serializers.SerializerMethodField(
+        help_text="YYYY-MM-DD the loan statuses were observed (outcomes are censored there); null until ready"
+    )
 
     class Meta:
         model = Dataset
@@ -177,6 +191,7 @@ class DatasetSerializer(serializers.ModelSerializer):
             "n_resolved",
             "issue_min",
             "issue_max",
+            "snapshot_date",
             "resolved_share",
             "default_rate",
             "status_counts",
@@ -185,12 +200,15 @@ class DatasetSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_snapshot_date(self, instance: Dataset) -> str | None:
+        return instance.snapshot_date
+
     def to_representation(self, instance: Dataset):
         data = super().to_representation(instance)
         data["params"] = dict(instance.params or {})
         data["params"].setdefault("exclude_variables", [])
         if data["status"] != "ready":
-            for key in ("n_loans", "n_resolved", "issue_min", "issue_max", "resolved_share", "default_rate"):
+            for key in ("n_loans", "n_resolved", "issue_min", "issue_max", "snapshot_date", "resolved_share", "default_rate"):
                 data[key] = None
             data["status_counts"] = {}
         return data

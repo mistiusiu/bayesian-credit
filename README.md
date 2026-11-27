@@ -54,40 +54,40 @@ flowchart LR
 
 ---
 
-## What it does on real data — in 77 seconds
+## What it does on real data — in 88 seconds
 
-`python scripts/run_pipeline.py --source lending_club --max-rows 300000 --max-loans 50000` — 300 k random Lending Club loans (2007–2018), models fitted on issues before 2015, **50 k borrowers replayed month by month 2015 → 2018 with real delayed feedback**, six policies, one laptop core, 2.1 GB peak RSS.
+`python scripts/run_pipeline.py --source lending_club --max-rows 300000 --max-loans 50000` — 300 k random loans from the Lending Club 2007–2020Q3 export (observed 2020-10-31), models fitted on issues before 2015, **50 k borrowers replayed month by month 2015-01 → 2020-09 (69 epochs) with real delayed feedback**, six policies, one laptop core, 2.5 GB peak RSS. Run on 2026-11-27.
 
 <table>
 <tr>
-<td align="center"><b>0.667</b><br/><sub>ROC-AUC, elapsed-term hold-out (n = 49 k)</sub></td>
-<td align="center"><b>0.031</b><br/><sub>expected calibration error</sub></td>
-<td align="center"><b>$86 M vs $30 M</b><br/><sub>Thompson vs historical policy, cumulative expected reward</sub></td>
-<td align="center"><b>$1.4 k vs $2.6 k</b><br/><sub>average regret per decision</sub></td>
+<td align="center"><b>0.676</b><br/><sub>ROC-AUC, elapsed-term hold-out (n = 94 k)</sub></td>
+<td align="center"><b>0.035</b><br/><sub>expected calibration error</sub></td>
+<td align="center"><b>$71 M vs $24 M</b><br/><sub>Thompson vs historical policy, cumulative expected reward</sub></td>
+<td align="center"><b>$1.3 k vs $2.2 k</b><br/><sub>average regret per decision</sub></td>
 </tr>
 <tr>
-<td align="center"><b>p<sub>DL</sub> = 0.243</b><br/><sub>delinquent → loss, estimated from 1.66 M transitions</sub></td>
-<td align="center"><b>1 trip</b><br/><sub>PSI 0.256 on <code>revol_util</code>, 2017-12 → human review</sub></td>
+<td align="center"><b>p<sub>DL</sub> = 0.243</b><br/><sub>delinquent → loss, estimated from 1.28 M transitions</sub></td>
+<td align="center"><b>3 trips</b><br/><sub><code>revol_util</code> 2018-01, grade mix 2019-05, COVID-19 2020-06 (PSI 0.41)</sub></td>
 <td align="center"><b>bit-identical</b><br/><sub>worker killed mid-run, resumed from checkpoint</sub></td>
-<td align="center"><b>6.6 k decisions/s</b><br/><sub>49 s for 300 k decisions</sub></td>
+<td align="center"><b>5.7 k decisions/s</b><br/><sub>52 s for 300 k decisions</sub></td>
 </tr>
 </table>
 
 ### Policies learn; the historical policy does not
 
-Cumulative expected reward under the hindsight yardstick, in USD millions — series in order: **Thompson** (red), **ε-greedy** (orange), **UCB1** (teal), random (grey), historical (navy). Thompson Sampling, ε-greedy and UCB1 separate from the reference policy within the first year and keep separating; random lending is worth more than the historical policy only because the model is risk-neutral and the historical book is conservative.
+Cumulative expected reward under the hindsight yardstick, in USD millions — series in order: **Thompson** (red), **ε-greedy** (orange), **UCB1** (teal), random (grey), historical (navy). Thompson Sampling, ε-greedy and UCB1 separate from the reference policy within the first year and keep separating until Lending Club's volume collapses in spring 2020 and every curve flattens; random lending is worth more than the historical policy only because the model is risk-neutral and the historical book is conservative.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"xyChart": {"plotColorPalette": "#e63946, #f4a261, #2a9d8f, #8d99ae, #1d3557", "titleColor": "#333", "xAxisLabelColor": "#555", "yAxisLabelColor": "#555"}}}}%%
 xychart-beta
     title "Cumulative expected reward (USD M)"
-    x-axis ["2015-01","2015-09","2016-05","2017-01","2017-09","2018-05","2018-12"]
-    y-axis "USD millions" 0 --> 90
-    line [1.6, 12.1, 28.2, 42.0, 56.7, 71.8, 86.0]
-    line [1.9, 13.3, 28.3, 41.1, 55.2, 70.0, 84.0]
-    line [0.6, 9.9, 24.8, 37.9, 52.2, 67.1, 81.2]
-    line [0.7, 6.0, 12.5, 18.1, 24.1, 31.7, 37.9]
-    line [0.5, 4.5, 9.1, 13.3, 18.4, 23.7, 29.5]
+    x-axis ["2015-01","2015-10","2016-07","2017-04","2018-01","2018-10","2019-07","2020-04","2020-09"]
+    y-axis "USD millions" 0 --> 80
+    line [1.0, 8.1, 18.1, 27.2, 37.5, 48.5, 59.6, 69.4, 70.7]
+    line [1.1, 9.7, 19.7, 29.2, 39.5, 50.4, 61.2, 70.5, 71.6]
+    line [0.2, 6.6, 16.2, 25.1, 35.4, 46.5, 58.2, 68.3, 69.6]
+    line [0.4, 3.8, 7.7, 11.0, 15.5, 20.0, 25.3, 29.3, 29.9]
+    line [0.2, 2.2, 4.3, 6.7, 10.0, 13.8, 18.8, 23.5, 24.1]
 ```
 
 Cumulative pseudo-regret against the per-group oracle — **Thompson** (red), **Thompson with σ²/n** (orange), historical (teal), random (grey). The bandits' curves bend; the historical and random policies' do not.
@@ -96,30 +96,30 @@ Cumulative pseudo-regret against the per-group oracle — **Thompson** (red), **
 %%{init: {"theme": "base", "themeVariables": {"xyChart": {"plotColorPalette": "#e63946, #f4a261, #2a9d8f, #8d99ae, #1d3557", "titleColor": "#333", "xAxisLabelColor": "#555", "yAxisLabelColor": "#555"}}}}%%
 xychart-beta
     title "Cumulative regret vs the per-group oracle (USD M)"
-    x-axis ["2015-01","2015-09","2016-05","2017-01","2017-09","2018-05","2018-12"]
-    y-axis "USD millions" 0 --> 130
-    line [1.4, 13.6, 26.7, 37.1, 48.5, 60.1, 71.5]
-    line [1.4, 14.2, 27.9, 37.9, 48.2, 58.6, 69.1]
-    line [2.5, 21.2, 45.8, 65.8, 86.9, 108.2, 128.0]
-    line [2.3, 19.7, 42.3, 60.9, 81.1, 100.2, 119.7]
+    x-axis ["2015-01","2015-10","2016-07","2017-04","2018-01","2018-10","2019-07","2020-04","2020-09"]
+    y-axis "USD millions" 0 --> 120
+    line [1.0, 10.8, 20.4, 28.6, 37.4, 47.1, 56.7, 65.0, 65.9]
+    line [1.0, 11.1, 20.6, 28.5, 36.7, 45.6, 54.7, 62.5, 63.4]
+    line [1.7, 16.7, 34.2, 49.1, 65.0, 81.7, 97.5, 111.0, 112.5]
+    line [1.6, 15.1, 30.8, 44.9, 59.5, 75.6, 91.0, 105.2, 106.8]
 ```
 
 ### The Sentinel catches a drift the model never saw
 
-Aggregate PSI of the monitored pre-decision features against the pre-2015 reference window. It climbs through 2017 as Lending Club's borrower mix changes, crosses the 0.10 watch band in mid-2017 and trips the 0.25 breaker in December 2017; the policies freeze on their champion snapshot, a review is opened, and after acknowledgement the reference is re-based and the PSI falls back to zero.
+Aggregate PSI of the monitored pre-decision features against the pre-2015 reference window. It climbs through 2017 as Lending Club's borrower mix changes, crosses the 0.10 watch band in mid-2017 and trips the 0.25 breaker in January 2018 (`revol_util` 0.262); the policies freeze on their champion snapshot, a review is opened, and after acknowledgement (automatic in this run) the reference is re-based and the PSI falls back to zero. The extra 21 months of the 2020Q3 export add two more trips: a grade-mix shift in May 2019 (grade PSI 0.253) and, in June 2020, the COVID-19 lending freeze, when the few loans Lending Club still issued looked nothing like its usual book (aggregate 0.412).
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"xyChart": {"plotColorPalette": "#e63946, #f4a261, #2a9d8f, #8d99ae, #1d3557", "titleColor": "#333", "xAxisLabelColor": "#555", "yAxisLabelColor": "#555"}}}}%%
 xychart-beta
     title "Aggregate PSI per epoch (watch 0.10 · breaker 0.25)"
-    x-axis ["2015-01","2015-07","2016-01","2016-07","2017-01","2017-07","2017-10","2017-11","2017-12","2018-01","2018-06","2018-12"]
-    y-axis "PSI" 0 --> 0.3
-    line [0.054, 0.059, 0.074, 0.085, 0.065, 0.120, 0.168, 0.206, 0.256, 0.003, 0.022, 0.058]
+    x-axis ["2015-01","2016-01","2017-01","2017-07","2017-11","2018-01","2018-02","2018-12","2019-03","2019-05","2019-06","2020-03","2020-05","2020-06","2020-07","2020-09"]
+    y-axis "PSI" 0 --> 0.45
+    line [0.058, 0.070, 0.064, 0.111, 0.210, 0.262, 0.006, 0.034, 0.109, 0.253, 0.003, 0.034, 0.047, 0.412, 0.059, 0.069]
 ```
 
 ### Default risk is heterogeneous — and the hierarchy knows it
 
-Posterior default probability by Lending Club grade (data-weighted mean over the groups of each grade, 76 groups, 1 657 leaves). The same borrowers, under the **shadow engine's** counterfactual policies, are repriced within ±5 points of their sub-grade reference rate — never blindly at the top of the grid.
+Posterior default probability by Lending Club grade (data-weighted mean over the groups of each grade, 73 groups, 1 586 leaves). The same borrowers, under the **shadow engine's** counterfactual policies, are repriced within ±5 points of their sub-grade reference rate — never blindly at the top of the grid.
 
 ```mermaid
 %%{init: {"theme": "base", "themeVariables": {"xyChart": {"plotColorPalette": "#e63946, #f4a261, #2a9d8f, #8d99ae, #1d3557", "titleColor": "#333", "xAxisLabelColor": "#555", "yAxisLabelColor": "#555"}}}}%%
@@ -127,10 +127,10 @@ xychart-beta
     title "Posterior P(default) by grade, pre-2015 training window"
     x-axis [A, B, C, D, E, F, G]
     y-axis "P(default)" 0 --> 0.45
-    bar [0.059, 0.110, 0.186, 0.249, 0.307, 0.346, 0.379]
+    bar [0.061, 0.108, 0.181, 0.240, 0.292, 0.334, 0.344]
 ```
 
-> **Read the counterfactual numbers as model quantities.** The shadow engine reports a +419 % expected-profit uplift over the historical book, decomposed as *repricing only* +128 % → *+ resizing* +282 % → *+ term choice* +419 %, and a risk-appetite sweep (λ = 1: +343 %, 29 % 36-month, mean amount $21 k). There is no take-up or adverse-selection term beyond the within-group policy effect, so most of the remaining uplift is larger exposures on borrowers the model believes are safe. The decomposition and the λ sweep exist precisely so that this is visible rather than hidden — see [`docs/SIMULATION.md` §10](docs/SIMULATION.md).
+> **Read the counterfactual numbers as model quantities.** The shadow engine reports a +316 % expected-profit uplift over the historical book, decomposed as *repricing only* +87 % → *+ resizing* +208 % → *+ term choice* +316 %, and a risk-appetite sweep (λ = 1: +257 %, 27 % 36-month, mean amount $21 k). There is no take-up or adverse-selection term beyond the within-group policy effect, so most of the remaining uplift is larger exposures on borrowers the model believes are safe. The decomposition and the λ sweep exist precisely so that this is visible rather than hidden — see [`docs/SIMULATION.md` §10](docs/SIMULATION.md).
 
 ---
 
@@ -157,9 +157,9 @@ flowchart TD
     P0["portfolio  p₀ ~ Beta(α₀, β₀)"]:::lvl0
     G1["group g = B | debt_consolidation | RENT<br/>prior mean = m₀, concentration κ_group"]:::lvl1
     G2["group g′ = E | other | MORTGAGE"]:::lvl1
-    L1["arm a = $10k @ 13% / 36m<br/>n = 686 → data dominate"]:::lvl2
-    L2["arm a′ = $10k @ 28% / 36m<br/>n = 0 → prior tilted by policy effect<br/>P(D) 0.057 → 0.115"]:::lvl2
-    L3["arm a″ = $40k @ 28% / 60m<br/>n = 0 → P(D) 0.256"]:::lvl2
+    L1["arm a = $10k @ 13% / 36m<br/>n = 637 → data dominate"]:::lvl2
+    L2["arm a′ = $10k @ 28% / 36m<br/>n = 0 → prior tilted by policy effect<br/>P(D) 0.096 at 7% → 0.215 at 28%"]:::lvl2
+    L3["arm a″ = $40k @ 28% / 60m<br/>n = 0 → P(D) 0.506"]:::lvl2
     P0 --> G1
     P0 --> G2
     G1 --> L1
@@ -167,7 +167,7 @@ flowchart TD
     G1 --> L3
 ```
 
-### Borrowers move through credit states — the chain fitted on 1.66 M real transitions
+### Borrowers move through credit states — the chain fitted on 1.28 M real transitions
 
 ```mermaid
 stateDiagram-v2
@@ -175,17 +175,19 @@ stateDiagram-v2
     [*] --> Current
     Current --> Current : 0.993
     Current --> Delinquent : 0.007
-    Delinquent --> Current : 0.002
+    Delinquent --> Current : 0.0001
     Delinquent --> Delinquent : 0.729
-    Delinquent --> Recovered : 0.026
+    Delinquent --> Recovered : 0.028
     Delinquent --> AbsorbedLoss : 0.243
     Recovered --> [*]
     AbsorbedLoss --> [*]
     note right of Delinquent
-        expected time to absorption 4.9 months
+        expected time to absorption 3.7 months
         P(loss | delinquent) = 0.90
     end note
 ```
+
+With the 2020-10 snapshot every pre-2015 training loan has resolved, so the D → C cure, which is only identifiable from loans still *Current* after a delinquency ([`docs/DATA.md`](docs/DATA.md) §4), is seen once in 32 k delinquent loan-months; on the legacy 2019-03 export it was 0.002.
 
 The proposal's matrix has structural zeros `P[C,R] = P[C,L] = 0` — a loan leaves *Current* only through *Delinquent* — and that is the default (`PROPOSAL`); an `EXTENDED` structure that allows pay-off `C → R` is one flag away.
 

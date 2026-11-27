@@ -20,6 +20,8 @@
 export type Id = number;
 /** RFC 3339 UTC timestamp, e.g. "2026-10-16T09:41:07Z". */
 export type IsoDateTime = string;
+/** "YYYY-MM-DD" */
+export type IsoDate = string;
 /** Issue month / simulation epoch, "YYYY-MM". */
 export type Epoch = string;
 /** Value in [0, 1]. */
@@ -206,6 +208,8 @@ export interface Dataset {
   n_resolved: number | null;
   issue_min: Epoch | null;
   issue_max: Epoch | null;
+  /** Day the loan statuses were observed; outcomes are censored there (2020-10-31 for the 2007-2020Q3 export). */
+  snapshot_date: IsoDate | null;
   /** Share of loans with a terminal outcome (Fully Paid / Charged Off / Default variants). */
   resolved_share: Fraction | null;
   /** Default share among resolved loans. */

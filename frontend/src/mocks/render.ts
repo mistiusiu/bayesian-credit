@@ -1,12 +1,13 @@
 /** Store records → API contract shapes. */
 import type { Dataset, Fit, Job, JobStatus, Paginated, Review, Simulation } from '@/api/types';
 import { policyBase } from '@/lib/domain';
-import { epochRange } from '@/lib/epoch';
+import { epochEnd, epochRange } from '@/lib/epoch';
 import { fmt } from '@/lib/format';
 import { datasetFacts } from './datasetStats';
 import { fitMetrics } from './fitViews';
 import { type DatasetRec, type FitRec, type JobRec, type ReviewRec, type SimRec, datasetIndex, db, fitMctm, fitModel, iso, simSeriesFor, tick } from './store';
 import { headline } from './simViews';
+import { snapshotOf } from './vocab';
 import { simView } from './views';
 
 export function jobState(j: JobRec, now: number): { status: JobStatus; progress: number } {
@@ -97,6 +98,7 @@ export function renderDataset(d: DatasetRec, now: number): Dataset {
     n_resolved: f?.nResolved ?? null,
     issue_min: f?.issueMin ?? null,
     issue_max: f?.issueMax ?? null,
+    snapshot_date: ready ? epochEnd(snapshotOf(d.params.source)) : null,
     resolved_share: f ? Math.round((f.nResolved / f.n) * 10000) / 10000 : null,
     default_rate: f ? Math.round((f.nDefault / f.nResolved) * 10000) / 10000 : null,
     status_counts: f?.statusCounts ?? {},

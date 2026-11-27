@@ -58,6 +58,11 @@ export function DatasetCards({ datasets, selectedId, onSelect, loading }: { data
                   <div>
                     <dt className="text-2xs text-muted">Issued</dt>
                     <dd className="font-medium text-ink">{d.issue_min ? `${d.issue_min.slice(0, 4)}–${d.issue_max?.slice(0, 4) ?? ''}` : '—'}</dd>
+                    {d.snapshot_date && (
+                      <dd className="text-2xs text-muted" title="Loan statuses observed here; later outcomes are censored">
+                        seen {fmt.epochShort(d.snapshot_date.slice(0, 7))}
+                      </dd>
+                    )}
                   </div>
                   <div>
                     <dt className="text-2xs text-muted">Resolved</dt>

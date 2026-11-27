@@ -51,8 +51,10 @@ For local development `make infra` starts only `postgres` + Temporal + UI, and t
 worker run from the Poetry environment against `localhost` (`make api`, `make worker`).
 
 `./data` is bind-mounted into the API container: put the Kaggle file at
-`data/raw/accepted_2007_to_2018Q4.csv.gz` (or run `scripts/download_data.sh`) and it is
-visible to the API. Fit artifacts and simulation run directories (checkpoints included) are
+`data/raw/Loan_status_2007-2020Q3.csv` (or run `scripts/download_data.sh`) and it is
+visible to the API. The images set `LENDING_CLUB_PATH` to that file; to serve the legacy
+`accepted_2007_to_2018Q4.csv.gz` instead, override it in the environment (compose) or in
+`deploy/k8s/configmap.yaml`. Fit artifacts and simulation run directories (checkpoints included) are
 written under `data/artifacts/`, shared by the API and the workers. Passwords default to
 development values; set `POSTGRES_PASSWORD`, `BC_DB_PASSWORD`, `TEMPORAL_DB_PASSWORD` and
 `DJANGO_SECRET_KEY` in the environment (or an `.env` file next to the compose file) before the
@@ -84,7 +86,7 @@ docker tag bayesian-credit-api:local ghcr.io/<you>/bayesian-credit-api:latest &&
 kubectl apply -k deploy/k8s
 kubectl -n bayesian-credit get pods -w
 # 5. data: copy the Lending Club file onto the PVC once
-kubectl -n bayesian-credit cp data/raw/accepted_2007_to_2018Q4.csv.gz \
+kubectl -n bayesian-credit cp data/raw/Loan_status_2007-2020Q3.csv \
   $(kubectl -n bayesian-credit get pod -l app=api -o name | cut -d/ -f2):/app/data/raw/
 # 6. open http://bayesian-credit.local and http://temporal.bayesian-credit.local (point both hosts at a
 #    node IP; Traefik is K3s' default ingress)

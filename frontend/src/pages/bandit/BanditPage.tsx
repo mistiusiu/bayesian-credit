@@ -29,6 +29,8 @@ export function BanditPage() {
         datasetId={sel.dataset?.status === 'ready' ? sel.datasetId : null}
         excluded={sel.dataset?.params.exclude_variables ?? []}
         datasetLoans={sel.dataset?.n_loans ?? null}
+        trainEnd={sel.fit?.status === 'ready' ? sel.fit.config.train_end : null}
+        issueMax={sel.dataset?.issue_max ?? null}
         onCreated={(s) => sel.setSim(s.id)}
       />
       <div className="mt-4">

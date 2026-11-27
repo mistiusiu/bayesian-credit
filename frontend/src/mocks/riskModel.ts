@@ -12,7 +12,7 @@ import { installment, interestThrough, rewardMoments, type RewardMoments } from 
 import { type LoanIndex, isDefault, isResolved, termOf } from './loans';
 import { ALL_FEATURES, fitOffsetLogit, type PolicyEffectFit } from './policyEffect';
 import { betaHdi, betaHdiApprox, clamp } from './stats';
-import { GRADE_LETTERS, HOME_KEYS, SNAPSHOT, ST, SUB_GRADES, VERIF_KEYS, purposeGroupOf } from './vocab';
+import { GRADE_LETTERS, HOME_KEYS, ST, SUB_GRADES, VERIF_KEYS, purposeGroupOf } from './vocab';
 
 export interface Node {
   key: string;
@@ -190,7 +190,7 @@ export function buildFitModel(idx: LoanIndex, config: FitConfig): FitModel {
     }
     if (!isResolved(idx, i)) continue;
     if (epoch < config.train_end) train.push(i);
-    else if (epochDiff(epoch, SNAPSHOT) >= termOf(idx, i)) test.push(i);
+    else if (epochDiff(epoch, idx.snapshot) >= termOf(idx, i)) test.push(i);
   }
 
   // reference rates: sub-grade → grade → global mean training int_rate
@@ -213,7 +213,7 @@ export function buildFitModel(idx: LoanIndex, config: FitConfig): FitModel {
 
   // realised share of scheduled interest, fully-paid training loans (elapsed if ≥ 1000)
   const paid = train.filter((i) => idx.status[i] === ST.FULLY_PAID);
-  const paidElapsed = paid.filter((i) => epochDiff(idx.epochs[idx.issue[i]], SNAPSHOT) >= termOf(idx, i));
+  const paidElapsed = paid.filter((i) => epochDiff(idx.epochs[idx.issue[i]], idx.snapshot) >= termOf(idx, i));
   const rhoRows = paidElapsed.length >= 1000 ? paidElapsed : paid;
   const cell = new Map<string, { s: number; n: number }>();
   const add = (key: string, v: number) => {
@@ -317,7 +317,7 @@ export function buildFitModel(idx: LoanIndex, config: FitConfig): FitModel {
     maxShift: cfgPE.max_abs_logit_shift,
   };
   if (config.hierarchy.policy_effect && features.length) {
-    const elapsed = train.filter((i) => epochDiff(idx.epochs[idx.issue[i]], SNAPSHOT) >= termOf(idx, i));
+    const elapsed = train.filter((i) => epochDiff(idx.epochs[idx.issue[i]], idx.snapshot) >= termOf(idx, i));
     const rows = elapsed.length >= cfgPE.min_elapsed_rows ? elapsed : train;
     const sample = rows === elapsed ? 'elapsed' : 'resolved';
     if (rows.length < cfgPE.min_rows) {

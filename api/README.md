@@ -44,7 +44,7 @@ The console (`frontend/`) proxies `/api` to the backend; point it here with
 | `DATABASE_URL` | `postgres://bc:bc@localhost:5432/bc` | `postgres://user:pass@host:5432/db?sslmode=require` (psycopg 3); `sqlite:///…` for throw-away runs |
 | `DATA_ROOT` | `<repo>/data` | |
 | `ARTIFACT_ROOT` | `<DATA_ROOT>/artifacts` | datasets, fits, run dirs, job logs |
-| `LENDING_CLUB_PATH` | `<DATA_ROOT>/raw/accepted_2007_to_2018Q4.csv.gz` | Kaggle file (`scripts/download_data.sh`) |
+| `LENDING_CLUB_PATH` | `<DATA_ROOT>/raw/Loan_status_2007-2020Q3.csv`, else `accepted_2007_to_2018Q4.csv.gz` when only the legacy export is there | Kaggle file (`scripts/download_data.sh`) |
 | `CORS_ALLOW_ALL_ORIGINS` | on when debug | `CORS_ALLOWED_ORIGINS` = comma list otherwise |
 | `JOBS_SYNC` | `0` | `1` runs jobs inline in the request (tests, `manage.py demo --inline`) |
 | `JOBS_BACKEND` | empty | dotted path of a `JobBackend`; empty = `TemporalBackend` (`InlineBackend` under `JOBS_SYNC`) |
@@ -282,7 +282,8 @@ Everything in `types.ts` is served with the documented names and nullability (ch
 6. **Calibration**: reliability bins are prediction deciles and `Calibration.ece` is computed on them
    (`docs/API.md §11.7`); `FitMetrics.ece` keeps the core's 10 equal-width bins (`types.ts`), so the two
    ECEs can differ (`Calibration.ece_equal_width` repeats the latter). Predictive metrics use the core's
-   primary holdout: resolved loans whose term elapsed by the 2019-03 snapshot.
+   primary holdout: resolved loans whose term elapsed by the dataset's snapshot (2020-10 for the
+   2007-2020Q3 export, 2019-03 for the legacy export and synthetic data).
 7. **`rolling_reward`** is recomputed by the API over 6 epochs (contract); the runner's 3-epoch value is
    in `rolling_reward_runner`.
 8. **PSI bucket tables** are recomputed (the runner stores per-feature PSI only) from the same
@@ -305,9 +306,10 @@ Everything in `types.ts` is served with the documented names and nullability (ch
 11. **`GET /fits/{id}/groups/`** returns a bare array (contract; the brief suggested pagination) and
     includes unobserved groups (cartesian product of observed dimension values).
 12. **Dataset `path`** must resolve under `DATA_ROOT` (or be `LENDING_CLUB_PATH`); both sources default
-    to the 2012-01..2018-12 issue window.
-13. **Simulation defaults**: `start` = the fit's `train_end`, `end` = the dataset's last epoch (equal to
-    `docs/API.md`'s 2015-01 / 2018-12 for default fits on full-range datasets); `pause` is also accepted
+    to `issue_from` 2012-01; `issue_to` defaults to the source's last issue month (2020-09 for
+    the 2007-2020Q3 export, 2018-12 for the legacy export and for synthetic data).
+13. **Simulation defaults**: `start` = the fit's `train_end`, `end` = the dataset's last epoch (2015-01 / 2020-09
+    for a default fit on a default Lending Club dataset); `pause` is also accepted
     while `queued`.
 14. **`RecoveryInfo.killed_at`** is the SIGKILL time for chaos, or the detection time for a worker
     that died on its own; `recovery_seconds` runs from it to the first epoch completed after resume.

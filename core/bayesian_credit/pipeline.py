@@ -4,15 +4,15 @@ Django API (SPEC §2.12, §3, §6).
     df, summary = prepare_dataset("synthetic", "data/runs/x/dataset.parquet", n=200_000, seed=7)
     fitted      = fit_models(df, cfg, train_end="2015-01-01")       # Two-Stage Beta-Beta + MCTM
     fitted.save("data/runs/x/fit"); fitted = FittedModels.load("data/runs/x/fit")
-    metrics     = evaluate_predictive(fitted, holdout_df, snapshot_date="2019-03-31")
+    metrics     = evaluate_predictive(fitted, holdout_df, snapshot_date=summary["snapshot_date"])
     per_loan, portfolio = run_shadow_portfolio(fitted, df, max_loans=50_000, seed=7)
     result      = run_simulation(df, fitted, SimulationConfig(...), "data/runs/x/sim")
     report      = build_report("data/runs/x/sim", fitted=fitted, shadow_summary=portfolio)
 
 **Calibration protocol [decision].** Among loans issued after ``train_end`` only those
 resolved by the snapshot have a known outcome, and for recent vintages those skew heavily
-towards early defaults (a loan issued in 2017 can have defaulted by 2019-03 but rarely
-have repaid a 36-month term). Predictive metrics are therefore reported on two holdout
+towards early defaults (a loan issued in 2019 can have defaulted by the 2020-10 snapshot
+of the default export but rarely have repaid a 36-month term). Predictive metrics are therefore reported on two holdout
 subsets: **primary** = resolved loans whose term has fully elapsed by the snapshot
 (``issue_d + term months <= snapshot_date``; nearly complete outcome information) and
 **secondary** = all resolved holdout loans (biased towards defaults; kept for

@@ -137,7 +137,7 @@ const JOB_LINES: Record<Exclude<JobKind, 'simulation'>, string[]> = {
     'resolving source and schema',
     'projecting the 60 retained Table 3 columns (data minimisation, F.4)',
     'parsing percent strings and Mon-YYYY dates; policy_code == 1',
-    'deriving y_* outcomes (snapshot 2019-03-31, charge-off lag 4 months)',
+    'deriving y_* outcomes (censored at the file snapshot, charge-off lag 4 months)',
     'assigning y_group (grade|purpose_group|home_ownership) and y_historical_arm',
     'writing parquet cache',
     'dataset ready',
@@ -334,9 +334,9 @@ function seed(): void {
   // newest ready fit → completed simulation) lands on the synthetic twin's research history.
   const lc: DatasetRec = {
     id: db.next.dataset++,
-    name: 'Lending Club 2012–2018 · 200k sample',
+    name: 'Lending Club 2012–2020Q3 · 200k sample',
     params: {
-      name: 'Lending Club 2012–2018 · 200k sample',
+      name: 'Lending Club 2012–2020Q3 · 200k sample',
       source: 'lending_club',
       path: 'data/raw/Loan_status_2007-2020Q3.csv',
       n: null,
@@ -344,7 +344,7 @@ function seed(): void {
       max_rows: 200000,
       sample_fraction: null,
       issue_from: '2012-01',
-      issue_to: '2018-12',
+      issue_to: '2020-09',
       shift: null,
     },
     nominalN: 200000,

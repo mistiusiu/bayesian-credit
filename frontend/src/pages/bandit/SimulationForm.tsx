@@ -22,6 +22,8 @@ const KNOWLEDGE: { value: Knowledge; label: string; title: string }[] = [
   { value: 'warm', label: 'Warm · trained fit', title: 'Policies are warm-started from the fit’s risk model (an offline-trained model)' },
   { value: 'cold', label: 'Cold · no offline model', title: 'Policies start from a flat prior and learn only from the rewards their own decisions earn' },
 ];
+/** First streamed month without a fit (api COLD_START_DEFAULT): earlier loans build the replay world. */
+const COLD_START_DEFAULT = '2015-01';
 const WARM_POLICIES: PolicyName[] = ['thompson', 'ucb1', 'epsilon_greedy', 'historical', 'random'];
 const COLD_POLICIES: PolicyName[] = ['greedy', 'thompson', 'ucb1', 'epsilon_greedy', 'historical'];
 
@@ -30,12 +32,18 @@ export function SimulationForm({
   datasetId = null,
   excluded = [],
   datasetLoans = null,
+  trainEnd = null,
+  issueMax = null,
   onCreated,
 }: {
   fitId: number | null;
   datasetId?: number | null;
   excluded?: string[];
   datasetLoans?: number | null;
+  /** The fit's train_end: a warm run starts streaming where the training data stops. */
+  trainEnd?: string | null;
+  /** The dataset's last issue month: runs stream to it by default. */
+  issueMax?: string | null;
   onCreated: (s: Simulation) => void;
 }) {
   const [name, setName] = useState('');
@@ -51,8 +59,11 @@ export function SimulationForm({
     setPolicies(k === 'cold' ? COLD_POLICIES : WARM_POLICIES);
   };
   const [feedback, setFeedback] = useState<FeedbackMode>('simulated');
-  const [start, setStart] = useState('2015-01');
-  const [end, setEnd] = useState('2018-12');
+  // untouched epochs follow the selected fit and dataset (the API defaults), e.g. 2015-01 – 2020-09
+  const [startIn, setStart] = useState<string | null>(null);
+  const [endIn, setEnd] = useState<string | null>(null);
+  const start = startIn ?? (useFit && trainEnd ? trainEnd : COLD_START_DEFAULT);
+  const end = endIn ?? issueMax ?? '2018-12';
   const [allLoans, setAllLoans] = useState(false);
   const [maxLoans, setMaxLoans] = useState<number | null>(50000);
   const [seed, setSeed] = useState<number | null>(42);
@@ -98,7 +109,7 @@ export function SimulationForm({
   };
 
   return (
-    <Disclosure title="New simulation" subtitle="Replay 2015–2018 borrowers through competing policies (background job, checkpointed)">
+    <Disclosure title="New simulation" subtitle={`Replay ${start.slice(0, 4)}–${end.slice(0, 4)} borrowers through competing policies (background job, checkpointed)`}>
       <form onSubmit={submit} className="space-y-4" noValidate>
         <div className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-ink-2">Starting knowledge</span>
