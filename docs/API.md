@@ -404,6 +404,8 @@ keys take these defaults (the **[decision]** defaults of `core/bayesian_credit/c
 | `dataset` | — | required id |
 | `name` | — | required |
 | `segmentation.dimensions` | `["grade", "purpose_group", "home_ownership"]` | ≥ 1 distinct `SegmentationDimension` |
+| `segmentation.refinement_order` | `fico_band, dti_band, income_band, emp_band, verification_status, application_type, sub_grade` minus dimensions built on an excluded variable | distinct `SegmentationDimension`s a breaker `resegment` appends, in order (dimensions already in use are skipped; `[]` = never refine); 400 on one built on an excluded variable |
+| `segmentation.max_refinements` | `null` (no cap) | integer 0–10: the most dimensions resegmenting may add. Each refinement multiplies the groups every contextual policy tracks, so a run whose breaker keeps tripping otherwise ends close to one group per borrower; stored as `max_dimensions` = dimensions + cap. The console's forms default to 2 |
 | `arm_space.amounts` | `[5000, 10000, …, 40000]` (step 5000) | > 0 |
 | `arm_space.rates` | `[0.07, 0.10, 0.13, 0.16, 0.19, 0.22, 0.25, 0.28]` | fractions in (0, 1) |
 | `arm_space.terms` | `[36, 60]` | positive integers (months) |
@@ -760,7 +762,7 @@ before `start` into `<run_dir>/fit`. Omitted fields take these defaults (`Simula
 | `fit` | — | required unless `cold_start` (400 `fit`) |
 | `dataset` ★ | — | cold start without a fit: the dataset to replay (400 `dataset` when missing / unknown, or when it differs from the fit's) |
 | `cold_start` ★ | `false` | policies start from the flat prior N(`prior_mu`, `prior_sigma`²) with no risk-model warm start |
-| `segmentation` ★ | the dataset's default dimensions | cold start without a fit only: `{ dimensions: SegmentationDimension[] }` of the replay world and the policies' groups, validated like a fit's (400 `segmentation` on an unknown or repeated dimension, one built on an excluded variable, or when a `fit` is named: the run then uses the fit's segmentation) |
+| `segmentation` ★ | the dataset's default dimensions | cold start without a fit only: `{ dimensions, refinement_order?, max_refinements? }` (as for a fit) of the replay world and the policies' groups, validated like a fit's (400 `segmentation` on an unknown or repeated dimension, one built on an excluded variable, or when a `fit` is named: the run then uses the fit's segmentation) |
 | `policies` | — | required, ≥ 1 distinct `PolicyName` |
 | `feedback_mode` | `"simulated"` | `simulated` (posterior-predictive environment) · `replay` (rejection sampling: update only when arm == historical) · `hybrid` |
 | `start` / `end` | the fit's `train_end` (cold start without a fit: `"2015-01"`) / the dataset's last epoch | inclusive epochs inside the dataset range; `start` must leave a reference window |
@@ -1102,7 +1104,7 @@ it is acknowledged automatically with `acknowledged_by = "auto_ack"`, `auto = tr
 | Action | Effect on the run |
 |---|---|
 | `resume` | keep the incumbent policy, unfreeze updates; reference window unchanged (the breaker usually stays half-open while drift persists) |
-| `resegment` | `Segmenter.refine()` (next dimension of `refinement_order`, which skips dimensions built on a variable the dataset excluded), refit the risk model on data to date, re-warm-start the bandits, rebase the reference window; `segmentation_after` set |
+| `resegment` | `Segmenter.refine()` (next dimension of `refinement_order`, which skips dimensions built on a variable the dataset excluded; nothing once `max_refinements` dimensions were added), refit the risk model on data to date, re-warm-start the bandits, rebase the reference window; `segmentation_after` set |
 | `rollback` | restore the champion snapshot taken before the drift and rebase the reference window |
 
 The breaker moves to `half_open`; a run waiting in `awaiting_review` resumes from the next epoch.

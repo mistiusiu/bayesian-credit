@@ -60,8 +60,8 @@ class SimulationCreateSerializer(serializers.Serializer):
     segmentation = serializers.JSONField(
         required=False,
         allow_null=True,
-        help_text="Fit-less cold start only: {dimensions: SegmentationDimension[]} of the replay world and the "
-        "policies' groups (default: the dataset's default dimensions)",
+        help_text="Fit-less cold start only: {dimensions, refinement_order?, max_refinements?} of the replay "
+        "world and the policies' groups, as for a fit (default: the dataset's default dimensions)",
     )
     name = serializers.CharField(max_length=200)
     policies = serializers.ListField(child=serializers.CharField(help_text=S.POLICY_HELP), allow_empty=False)
@@ -132,7 +132,7 @@ class SimulationCreateSerializer(serializers.Serializer):
         if errors:
             raise serializers.ValidationError(errors)
         raw: dict = {"hierarchy": hierarchy, "data": {"snapshot_date": ds.snapshot_date}}
-        seg = segmentation_block(dims, ds)
+        seg = segmentation_block(dims, ds, attrs.get("segmentation"))
         if seg:
             raw["segmentation"] = seg
         return None, ds, FrameworkConfig.from_dict(raw)

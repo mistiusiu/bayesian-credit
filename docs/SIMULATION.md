@@ -69,7 +69,8 @@ Acknowledgement actions (`ReviewAction`):
   the trip (everything learned since the incident is discarded);
 * `resegment` – `segmenter.refine()` (next dimension of `refinement_order`, e.g.
   `fico_band`; dimensions built on a variable the dataset excluded are skipped, so a no-FICO
-  run refines by `dti_band` first); the environment's two-stage model is re-fitted on every loan resolved so
+  run refines by `dti_band` first; once `segmentation.max_dimensions` is reached the
+  refinement is a no-op logged with `note: "no refinement dimension left"`); the environment's two-stage model is re-fitted on every loan resolved so
   far under the new keys; every contextual policy is `resegment(new_segmenter,
   env.prior_provider)`-ed (groups re-warm-started lazily; feedback of decisions made under
   the old segmentation updates the pooled level only); `ResegmentationApplied` is logged.
